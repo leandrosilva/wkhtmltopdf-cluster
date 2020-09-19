@@ -27,10 +27,10 @@ fn main() {
     let matches = app.get_matches_mut();
     match matches.subcommand() {
         ("start", Some(sub_matches)) => {
-            let output_dir = sub_matches.value_of("output").unwrap();
+            let output_dir = Path::new(sub_matches.value_of("output").unwrap());
 
             println!("WkHTMLtoPDF Cluster :: Worker :: Start");
-            match run(Path::new(output_dir)) {
+            match run(output_dir) {
                 Ok(()) => println!("Work done"),
                 Err(reason) => eprintln!("Failed due to: {}", reason),
             }
