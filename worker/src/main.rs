@@ -30,6 +30,7 @@ fn main() {
             let output_dir = Path::new(sub_matches.value_of("output").unwrap());
 
             println!("WkHTMLtoPDF Cluster :: Worker :: Start");
+            start_subscriber();
             match run(output_dir) {
                 Ok(()) => println!("Work done"),
                 Err(reason) => eprintln!("Failed due to: {}", reason),
@@ -41,9 +42,16 @@ fn main() {
     }
 }
 
+fn start_subscriber() {
+    let ctx = zmq::Context::new();
+
+    let subscriber = ctx.socket(zmq::PUB).unwrap();
+    subscriber.connect("tcp://127.0.0.1:6666").expect("failed to listen on port 6666");
+}
+
 fn run(output_dir: &Path) -> Result<()> {
     let url = "https://www.google.com.br";
-    let mut pdf_app = PdfApplication::new().expect("Failed to init PDF application");
+    let mut pdf_app = PdfApplication::new().expect("failed to init PDF application");
 
     for i in 0..3 {
         let filepath = output_dir.join(Path::new(format!("google-{}.pdf", i).as_str()));
@@ -54,11 +62,11 @@ fn run(output_dir: &Path) -> Result<()> {
             .margin(Size::Inches(2))
             .title("A taste of WkHTMLtoPDF Cluster")
             .build_from_url(url.parse().unwrap())
-            .expect(format!("Failed to build {}", filepath.to_str().unwrap()).as_str());
+            .expect(format!("failed to build {}", filepath.to_str().unwrap()).as_str());
 
         pdfout
             .save(&filepath)
-            .expect(format!("Failed to save {}", filepath.to_str().unwrap()).as_str());
+            .expect(format!("failed to save {}", filepath.to_str().unwrap()).as_str());
 
         println!("Generated PDF saved as: {}", filepath.to_str().unwrap());
     }

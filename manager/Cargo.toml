@@ -9,3 +9,4 @@ edition = "2018"
 [dependencies]
 error-chain = "0.12.4"
 clap = "3.0.0-beta.1"
+zmq = "0.9"
