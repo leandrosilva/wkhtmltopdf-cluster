@@ -1,9 +1,9 @@
 use clap::{App, Arg};
 use error_chain::*;
 use std::env;
-use std::io::{self, Write};
 use std::path::Path;
 use std::process::Command;
+use std::{thread, time};
 use zmq;
 
 error_chain! {}
@@ -57,11 +57,11 @@ fn main() {
                 .unwrap_or_else(|_err| get_default_output_dir());
 
             println!("WkHTMLtoPDF Cluster :: Manager :: Start");
-            start_proxy();
-            match run_workers(w_instances, Path::new(&w_binpath), Path::new(&w_output)) {
-                Ok(()) => println!("Work done"),
+            match start_workers(w_instances, Path::new(&w_binpath), Path::new(&w_output)) {
+                Ok(()) => println!("Workers are ready to rock!"),
                 Err(reason) => eprintln!("Failed due to: {}", reason),
             }
+            start_proxy();
             println!("WkHTMLtoPDF Cluster :: Manager :: End");
         }
         ("", None) => app.print_help().unwrap(),
@@ -80,38 +80,34 @@ fn get_default_output_dir() -> String {
     String::from("./examples/pdf")
 }
 
+fn start_workers(w_instances: usize, w_binpath: &Path, w_output: &Path) -> Result<()> {
+    for i in 0..w_instances {
+        Command::new(w_binpath)
+            .arg("start")
+            .arg("--output")
+            .arg(w_output.to_str().unwrap())
+            .spawn()
+            .expect(format!("failed to start #{} {:?}", i, w_binpath).as_str());
+        thread::sleep(time::Duration::from_millis(100));
+    }
+
+    Ok(())
+}
+
 fn start_proxy() {
     let ctx = zmq::Context::new();
 
     // Socket facing clients
-    let frontend = ctx.socket(zmq::SUB).unwrap();
-    frontend.bind("tcp://127.0.0.1:9999").expect("failed connecting frontend");
+    let frontend = ctx.socket(zmq::ROUTER).unwrap();
+    frontend
+        .bind("tcp://127.0.0.1:9999")
+        .expect("failed connecting frontend");
 
     // Socket facing workers
-    let backend = ctx.socket(zmq::PUB).unwrap();
-    backend.bind("tcp://127.0.0.1:6666").expect("failed connecting backend");
+    let backend = ctx.socket(zmq::DEALER).unwrap();
+    backend
+        .bind("tcp://127.0.0.1:6666")
+        .expect("failed connecting backend");
 
     zmq::proxy(&frontend, &backend).expect("failed to start proxying");
-}
-
-fn run_workers(w_instances: usize, w_binpath: &Path, w_output: &Path) -> Result<()> {
-    for i in 0..w_instances {
-        println!(">> Worker #{}", i);
-
-        let output = Command::new(w_binpath)
-            .arg("start")
-            .arg("--output")
-            .arg(w_output.to_str().unwrap())
-            .output()
-            .expect(format!("failed to start #{} {:?}", i, w_binpath).as_str());
-
-        println!("Exit code: {}", output.status.code().unwrap_or(666));
-        if output.status.success() {
-            io::stdout().write_all(&output.stdout).unwrap();
-        } else {
-            error_chain::bail!(format!("Command #{} executed with failing error code", i).as_str());
-        }
-    }
-
-    Ok(())
 }
