@@ -72,7 +72,7 @@ fn main() {
 fn get_default_worker_path() -> String {
     let mut current_dir = env::current_exe().unwrap();
     current_dir.pop();
-    current_dir.push("wkhtmltopdf-cluster-worker");
+    current_dir.push("worker");
     String::from(current_dir.to_str().unwrap())
 }
 

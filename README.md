@@ -4,12 +4,19 @@ This is a side project to experiment in creating a cluster of processes to conve
 
 ## Build
 
-    $ cargo build -p wkhtmltopdf-cluster-worker --release
-    $ cargo build -p wkhtmltopdf-cluster-manager --release
+    $ cargo build --release
 
 ## Run
 
-    $ ./target/release/wkhtmltopdf-cluster-manager start -i 3 -o ./examples/pdf
+Spin up 3 workers:
+
+    $ target/release/broker start -i 3 -o ./examples/pdf/
+
+Then test it with a client:
+
+    $ cd ./examples/client
+    $ source venv/bin/activate
+    $ python client.py
 
 ## Copyright
 
