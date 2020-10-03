@@ -1,16 +1,24 @@
 use error_chain::*;
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
-use std::process::Command;
+use std::process::{Child, Command};
 use std::{thread, time};
 use zmq;
 
 error_chain! {}
 
 #[derive(Debug)]
+struct WorkerRef {
+    pid: u32,
+    os_process: Child,
+}
+
+#[derive(Debug)]
 pub struct Broker {
     pub worker_instances: usize,
     pub worker_binpath: PathBuf,
     pub worker_outpath: PathBuf,
+    running_workers: HashMap<u32, WorkerRef>,
 }
 
 impl Broker {
@@ -19,37 +27,49 @@ impl Broker {
             worker_instances: worker_instances,
             worker_binpath: PathBuf::from(worker_binpath),
             worker_outpath: PathBuf::from(worker_outpath),
+            running_workers: HashMap::new(),
         };
         instance
     }
 
-    pub fn start(&self) -> Result<()> {
-        match start_workers(
-            self.worker_instances,
-            &self.worker_binpath,
-            &self.worker_outpath,
-        ) {
-            Ok(()) => println!("Workers are ready to rock!"),
+    pub fn start(&mut self) -> Result<()> {
+        match self.start_workers() {
+            Ok(()) => {
+                println!("Workers are ready to rock!");
+                for (pid, _worker) in &self.running_workers {
+                    println!("- Worker PID: {}", pid);
+                }
+            }
             Err(reason) => eprintln!("Failed due to: {}", reason),
         }
         start_proxy();
         Ok(())
     }
-}
 
-fn start_workers(w_instances: usize, w_binpath: &Path, w_output: &Path) -> Result<()> {
-    for i in 0..w_instances {
-        let child = Command::new(w_binpath)
-            .arg("start")
-            .arg("--output")
-            .arg(w_output.to_str().unwrap())
-            .spawn()
-            .expect(format!("failed to start #{} {:?}", i, w_binpath).as_str());
-        println!("PID: {}", child.id());
-        thread::sleep(time::Duration::from_millis(100));
+    pub fn stop(&self) -> Result<()> {
+        // TODO: block requests, finish work in process, stop proxy and then workers
+        Ok(())
     }
 
-    Ok(())
+    fn start_workers(&mut self) -> Result<()> {
+        for i in 0..self.worker_instances {
+            let child = Command::new(&self.worker_binpath)
+                .arg("start")
+                .arg("--output")
+                .arg(&self.worker_outpath.to_str().unwrap())
+                .spawn()
+                .expect(format!("failed to start #{} {:?}", i, self.worker_binpath).as_str());
+            self.running_workers.insert(
+                child.id(),
+                WorkerRef {
+                    pid: child.id(),
+                    os_process: child,
+                },
+            );
+            thread::sleep(time::Duration::from_millis(100));
+        }
+        Ok(())
+    }
 }
 
 fn start_proxy() {
@@ -83,5 +103,15 @@ mod tests {
         assert_eq!(broker.worker_instances, 2);
         assert_eq!(broker.worker_binpath.as_os_str(), "bin");
         assert_eq!(broker.worker_outpath.as_os_str(), "out");
+    }
+
+    #[test]
+    fn start_broker() {
+        assert!(true);
+    }
+
+    #[test]
+    fn stop_broker() {
+        assert!(true);
     }
 }

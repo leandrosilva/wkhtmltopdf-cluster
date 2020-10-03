@@ -55,7 +55,7 @@ fn main() {
                 .unwrap_or_else(|_err| get_default_output_dir());
 
             println!("WkHTMLtoPDF Cluster :: Manager :: Start");
-            let broker = Broker::new(w_instances, Path::new(&w_binpath), Path::new(&w_output));
+            let mut broker = Broker::new(w_instances, Path::new(&w_binpath), Path::new(&w_output));
             broker.start().unwrap();
             println!("WkHTMLtoPDF Cluster :: Manager :: End");
         }
