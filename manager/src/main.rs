@@ -82,12 +82,13 @@ fn get_default_output_dir() -> String {
 
 fn start_workers(w_instances: usize, w_binpath: &Path, w_output: &Path) -> Result<()> {
     for i in 0..w_instances {
-        Command::new(w_binpath)
+        let child = Command::new(w_binpath)
             .arg("start")
             .arg("--output")
             .arg(w_output.to_str().unwrap())
             .spawn()
             .expect(format!("failed to start #{} {:?}", i, w_binpath).as_str());
+        println!("PID: {}", child.id());
         thread::sleep(time::Duration::from_millis(100));
     }
 
