@@ -6,6 +6,9 @@ use wkhtmltopdf_cluster::broker::Broker;
 
 error_chain! {}
 
+// $ cargo run -p wkhtmltopdf-cluster --bin broker start -i 2
+//
+
 fn main() {
     let mut app = App::new("WkHTMLtoPDF Cluster")
         .version("1.0")

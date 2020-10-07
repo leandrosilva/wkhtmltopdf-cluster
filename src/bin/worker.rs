@@ -6,6 +6,9 @@ use wkhtmltopdf::{Orientation, PdfApplication, Size};
 
 error_chain! {}
 
+// $ cargo run -p wkhtmltopdf-cluster --bin worker start --output ./examples/pdf
+//
+
 fn main() {
     let mut app = App::new("WkHTMLtoPDF Cluster")
         .version("1.0")
