@@ -1,6 +1,7 @@
 use clap::{App, Arg};
 use error_chain::*;
 use std::path::Path;
+use std::process;
 use std::time::{SystemTime, UNIX_EPOCH};
 use wkhtmltopdf::{Orientation, PdfApplication, Size};
 
@@ -33,7 +34,7 @@ fn main() {
         ("start", Some(sub_matches)) => {
             let output_dir = Path::new(sub_matches.value_of("output").unwrap());
 
-            let worker_id = get_id();
+            let worker_id = get_pid();
 
             println!("WkHTMLtoPDF Cluster :: Worker :: Start [#{}]", worker_id);
             match run(worker_id, output_dir) {
@@ -47,7 +48,7 @@ fn main() {
     }
 }
 
-fn run(worker_id: u64, output_dir: &Path) -> Result<()> {
+fn run(worker_id: u32, output_dir: &Path) -> Result<()> {
     let ctx = zmq::Context::new();
     let subscriber = ctx.socket(zmq::REP).unwrap();
     subscriber
@@ -66,7 +67,7 @@ fn run(worker_id: u64, output_dir: &Path) -> Result<()> {
             break;
         }
 
-        let message_id = get_id();
+        let message_id = get_uid();
         let url = message;
         let filepath = output_dir.join(Path::new(format!("google-{}.pdf", message_id).as_str()));
 
@@ -91,7 +92,11 @@ fn run(worker_id: u64, output_dir: &Path) -> Result<()> {
     Ok(())
 }
 
-fn get_id() -> u64 {
+fn get_pid() -> u32 {
+    process::id()
+}
+
+fn get_uid() -> u64 {
     let start = SystemTime::now();
     let since_the_epoch = start
         .duration_since(UNIX_EPOCH)

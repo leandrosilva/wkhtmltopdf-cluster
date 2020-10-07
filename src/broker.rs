@@ -35,7 +35,7 @@ impl Broker {
     pub fn start(&mut self) -> Result<()> {
         match self.start_workers() {
             Ok(()) => {
-                println!("Workers are ready to rock!");
+                println!("Workers are ready to rock now!");
                 for (pid, _worker) in &self.running_workers {
                     println!("- Worker PID: {}", pid);
                 }
