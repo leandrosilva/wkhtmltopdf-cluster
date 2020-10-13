@@ -1,11 +1,16 @@
 use clap::{App, Arg};
 use error_chain::*;
+use std::fs;
 use std::path::Path;
 use std::process;
 use std::time::{SystemTime, UNIX_EPOCH};
 use wkhtmltopdf::{Orientation, PdfApplication, Size};
 
-error_chain! {}
+error_chain! {
+    foreign_links {
+        Io(std::io::Error);
+    }
+}
 
 // $ cargo run -p wkhtmltopdf-cluster --bin worker start --output ./examples/pdf
 //
@@ -33,11 +38,12 @@ fn main() {
     match matches.subcommand() {
         ("start", Some(sub_matches)) => {
             let output_dir = Path::new(sub_matches.value_of("output").unwrap());
+            create_keys_dir_if_not_exists(&output_dir).unwrap();
 
             let worker_id = get_pid();
 
             println!("WkHTMLtoPDF Cluster :: Worker :: Start [#{}]", worker_id);
-            match run(worker_id, output_dir) {
+            match run(worker_id, &output_dir) {
                 Ok(()) => println!("Work is done!"),
                 Err(reason) => eprintln!("Failed due to: {}", reason),
             }
@@ -104,4 +110,12 @@ fn get_uid() -> u64 {
     let time_in_ms =
         since_the_epoch.as_secs() * 1000 + since_the_epoch.subsec_nanos() as u64 / 1_000_000;
     time_in_ms
+}
+
+fn create_keys_dir_if_not_exists(output_dir: &Path) -> Result<()> {
+    if output_dir.is_dir() {
+        return Ok(());
+    }
+
+    Ok(fs::create_dir_all(output_dir).unwrap())
 }

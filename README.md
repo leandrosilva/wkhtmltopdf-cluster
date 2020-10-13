@@ -10,7 +10,7 @@ This is a side project to experiment in creating a cluster of processes to conve
 
 Spin up 3 workers:
 
-    $ target/release/broker start -i 3 -o ./examples/pdf/
+    $ target/release/wk_broker start -i 3 -o ./examples/pdf/
 
 Then test it with a client:
 
