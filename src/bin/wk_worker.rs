@@ -30,13 +30,15 @@ fn main() {
     match matches.subcommand() {
         ("start", Some(sub_matches)) => {
             let output_dir = Path::new(sub_matches.value_of("output").unwrap());
-            create_dir_if_not_exists(&output_dir);
+            create_dir_if_not_exists(&output_dir).expect("failed to create directory");
 
             let worker_id = process::id();
 
             println!("WkHTMLtoPDF Cluster :: Worker :: Start [#{}]", worker_id);
             let mut worker = Worker::new(worker_id, output_dir);
-            worker.start().unwrap();
+            worker
+                .start(|| println!("Worker is ready to rock"))
+                .expect("failed to start up worker");
             println!("WkHTMLtoPDF Cluster :: Worker :: End [#{}]", worker_id);
         }
         ("", None) => app.print_help().unwrap(),
