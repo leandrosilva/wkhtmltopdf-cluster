@@ -1,10 +1,7 @@
 use clap::{App, Arg};
-use error_chain::*;
 use std::env;
 use std::path::Path;
 use wkhtmltopdf_cluster::broker::Broker;
-
-error_chain! {}
 
 // $ cargo run -p wkhtmltopdf-cluster --bin broker start -i 2
 //

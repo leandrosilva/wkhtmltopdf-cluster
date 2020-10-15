@@ -1,15 +1,8 @@
 use clap::{App, Arg};
-use error_chain::*;
-use std::fs;
-use std::process;
 use std::path::Path;
+use std::process;
+use wkhtmltopdf_cluster::helpers::create_dir_if_not_exists;
 use wkhtmltopdf_cluster::worker::Worker;
-
-error_chain! {
-    foreign_links {
-        Io(std::io::Error);
-    }
-}
 
 // $ cargo run -p wkhtmltopdf-cluster --bin worker start --output ./examples/pdf
 //
@@ -37,7 +30,7 @@ fn main() {
     match matches.subcommand() {
         ("start", Some(sub_matches)) => {
             let output_dir = Path::new(sub_matches.value_of("output").unwrap());
-            create_keys_dir_if_not_exists(&output_dir).unwrap();
+            create_dir_if_not_exists(&output_dir);
 
             let worker_id = process::id();
 
@@ -49,12 +42,4 @@ fn main() {
         ("", None) => app.print_help().unwrap(),
         _ => unreachable!(),
     }
-}
-
-pub fn create_keys_dir_if_not_exists(output_dir: &Path) -> Result<()> {
-    if output_dir.is_dir() {
-        return Ok(());
-    }
-
-    Ok(fs::create_dir_all(output_dir).unwrap())
 }

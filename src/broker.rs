@@ -1,11 +1,9 @@
-use error_chain::*;
+use super::error::Result;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command};
 use std::{thread, time};
 use zmq;
-
-error_chain! {}
 
 #[derive(Debug)]
 struct WorkerRef {

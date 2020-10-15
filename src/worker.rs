@@ -1,10 +1,8 @@
-use error_chain::*;
+use super::error::Result;
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 use wkhtmltopdf::{Orientation, PdfApplication, Size};
 use zmq;
-
-error_chain! {}
 
 #[derive(Debug)]
 pub struct Worker {
