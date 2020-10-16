@@ -56,7 +56,14 @@ fn main() {
 
             println!("WkHTMLtoPDF Cluster :: Manager :: Start");
             let mut broker = Broker::new(w_instances, Path::new(&w_binpath), Path::new(&w_output));
-            broker.start().unwrap();
+            broker
+                .start(|pids| {
+                    println!("All workers are up & running:");
+                    for pid in pids {
+                        println!("- Worker PID: {}", pid);
+                    }
+                })
+                .unwrap();
             println!("WkHTMLtoPDF Cluster :: Manager :: End");
         }
         ("", None) => app.print_help().unwrap(),

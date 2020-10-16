@@ -30,17 +30,12 @@ impl Broker {
         instance
     }
 
-    pub fn start(&mut self) -> Result<()> {
-        match self.start_workers() {
-            Ok(()) => {
-                println!("Workers are ready to rock now!");
-                for (pid, _worker) in &self.running_workers {
-                    println!("- Worker PID: {}", pid);
-                }
-            }
-            Err(reason) => eprintln!("Failed due to: {}", reason),
-        }
-        start_proxy();
+    pub fn start<F: Fn(Vec<u32>)>(&mut self, on_ready: F) -> Result<()> {
+        self.start_workers().expect("failed to start workers");
+        start_proxy(|| {
+            let pids = self.running_workers.iter().map(|kv| *kv.0).collect();
+            on_ready(pids);
+        });
         Ok(())
     }
 
@@ -70,7 +65,7 @@ impl Broker {
     }
 }
 
-fn start_proxy() {
+fn start_proxy<F: Fn()>(on_ready: F) {
     let ctx = zmq::Context::new();
 
     // Socket facing clients
@@ -85,6 +80,7 @@ fn start_proxy() {
         .bind("tcp://127.0.0.1:6666")
         .expect("failed connecting backend");
 
+    on_ready();
     zmq::proxy(&frontend, &backend).expect("failed to start proxying");
 }
 
