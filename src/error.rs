@@ -3,6 +3,7 @@ use std::fmt;
 use std::io;
 use std::process;
 use std::convert::From;
+use zmq;
 
 type DynError = Box<dyn Error>;
 type OptError = Option<DynError>;
@@ -41,6 +42,12 @@ impl fmt::Display for AnyError {
 
 impl From<io::Error> for AnyError {
     fn from(error: io::Error) -> Self {
+        AnyError::new(&error.to_string(), Some(Box::new(error)))
+    }
+}
+
+impl From<zmq::Error> for AnyError {
+    fn from(error: zmq::Error) -> Self {
         AnyError::new(&error.to_string(), Some(Box::new(error)))
     }
 }

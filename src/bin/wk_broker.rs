@@ -50,6 +50,7 @@ fn main() {
         );
 
     let stop_signal: Arc<AtomicBool> = Arc::new(AtomicBool::new(false));
+    watch_stop_signal(stop_signal.clone());
 
     let matches = app.get_matches_mut();
     match matches.subcommand() {
@@ -68,12 +69,11 @@ fn main() {
                 Path::new(&w_binpath),
                 Path::new(&w_output),
             )));
-            watch_stop_signal(stop_signal.clone(), broker.clone());
             broker
                 .clone()
                 .write()
                 .expect("failed to acquire lock on broker to start it")
-                .start(|pids| {
+                .run(|pids| {
                     println!("All workers are up & running:");
                     for pid in pids {
                         println!("- Worker PID: {}", pid);
@@ -81,13 +81,15 @@ fn main() {
                 })
                 .expect("failed to start broker");
             println!("WkHTMLtoPDF Cluster :: Manager :: End");
+            println!("Bye, bye!");
+            process::exit(0);
         }
         ("", None) => app.print_help().unwrap(),
         _ => unreachable!(),
     }
 }
 
-fn watch_stop_signal(stop_signal: Arc<AtomicBool>, broker: Arc<RwLock<Broker>>) {
+fn watch_stop_signal(stop_signal: Arc<AtomicBool>) {
     let stop = stop_signal.clone();
     ctrlc::set_handler(move || {
         println!("Received Ctrl+C\nShutting down...");
@@ -96,17 +98,9 @@ fn watch_stop_signal(stop_signal: Arc<AtomicBool>, broker: Arc<RwLock<Broker>>) 
     .expect("Error setting Ctrl-C handler");
 
     let stop = stop_signal.clone();
-    let broker = broker.clone();
     std::thread::spawn(move || loop {
         if stop.load(Ordering::SeqCst) {
             Broker::send_stop_signal().expect("failed to send stop signal to broker");
-            broker
-                .read()
-                .expect("failed to acquire lock on broker to stop it")
-                .stop()
-                .expect("failed to stop broker");
-            println!("Bye, bye!");
-            process::exit(0);
         }
         thread::sleep(Duration::from_secs(1));
     });

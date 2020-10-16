@@ -1,4 +1,4 @@
-use super::error::Result;
+use super::error::{AnyError, Result};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command};
@@ -31,32 +31,19 @@ impl Broker {
         instance
     }
 
-    pub fn start<F: Fn(Vec<u32>)>(&mut self, on_ready: F) -> Result<()> {
+    pub fn run<F: Fn(Vec<u32>)>(&mut self, on_ready: F) -> Result<()> {
+        self.start(on_ready).expect("failed to start broker");
+        self.stop().expect("failed to stop broker");
+        Ok(())
+    }
+
+    fn start<F: Fn(Vec<u32>)>(&mut self, on_ready: F) -> Result<()> {
         self.start_workers().expect("failed to start workers");
-        start_proxy(|| {
+        self.start_proxy(|| {
             let pids = self.running_workers.iter().map(|kv| *kv.0).collect();
             on_ready(pids);
-        });
-        Ok(())
-    }
-
-    pub fn send_stop_signal() -> Result<()> {
-        let ctx = zmq::Context::new();
-        let control = ctx.socket(zmq::PUB).unwrap();
-        control
-            .bind("tcp://127.0.0.1:6662")
-            .expect("failed connecting control");
-        thread::sleep(Duration::from_secs(1));
-
-        control
-            .send("TERMINATE", 0)
-            .expect("failed to send TERMINATE message");
-        Ok(())
-    }
-
-    pub fn stop(&self) -> Result<()> {
-        // TODO: block requests, finish work in process, stop proxy and then workers
-        println!("Stopping...");
+        })
+        .expect("failed to start proxy");
         Ok(())
     }
 
@@ -79,34 +66,52 @@ impl Broker {
         }
         Ok(())
     }
-}
 
-fn start_proxy<F: Fn()>(on_ready: F) {
-    let ctx = zmq::Context::new();
+    fn start_proxy<F: Fn()>(&self, on_ready: F) -> Result<()> {
+        let ctx = zmq::Context::new();
+        // Socket facing clients
+        let mut frontend = ctx.socket(zmq::ROUTER).unwrap();
+        frontend
+            .bind("tcp://127.0.0.1:6660")
+            .expect("failed connecting frontend");
+        // Socket facing workers
+        let mut backend = ctx.socket(zmq::DEALER).unwrap();
+        backend
+            .bind("tcp://127.0.0.1:6661")
+            .expect("failed connecting backend");
+        // Socket for controlling
+        let mut control = ctx.socket(zmq::SUB).unwrap();
+        control
+            .connect("tcp://127.0.0.1:6662")
+            .expect("failed connecting control");
+        control
+            .set_subscribe(b"")
+            .expect("failed subscribing to control");
+        on_ready();
+        match zmq::proxy_steerable(&mut frontend, &mut backend, &mut control) {
+            Ok(()) => Ok(()),
+            Err(reason) => Err(AnyError::from(reason)),
+        }
+    }
 
-    // Socket facing clients
-    let mut frontend = ctx.socket(zmq::ROUTER).unwrap();
-    frontend
-        .bind("tcp://127.0.0.1:6660")
-        .expect("failed connecting frontend");
+    fn stop(&self) -> Result<()> {
+        // TODO: block requests, finish work in process, stop proxy and then workers
+        println!("Stopping...");
+        Ok(())
+    }
+    pub fn send_stop_signal() -> Result<()> {
+        let ctx = zmq::Context::new();
+        let control = ctx.socket(zmq::PUB).unwrap();
+        control
+            .bind("tcp://127.0.0.1:6662")
+            .expect("failed connecting control");
+        thread::sleep(Duration::from_secs(1));
 
-    // Socket facing workers
-    let mut backend = ctx.socket(zmq::DEALER).unwrap();
-    backend
-        .bind("tcp://127.0.0.1:6661")
-        .expect("failed connecting backend");
-
-    // Socket for controlling
-    let mut control = ctx.socket(zmq::SUB).unwrap();
-    control
-        .connect("tcp://127.0.0.1:6662")
-        .expect("failed connecting control");
-    control
-        .set_subscribe(b"")
-        .expect("failed subscribing to control");
-
-    on_ready();
-    zmq::proxy_steerable(&mut frontend, &mut backend, &mut control).expect("failed to start proxy");
+        match control.send("TERMINATE", 0) {
+            Ok(()) => Ok(()),
+            Err(reason) => Err(AnyError::from(reason)),
+        }
+    }
 }
 
 // Unit testing
