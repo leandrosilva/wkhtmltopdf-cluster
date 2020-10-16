@@ -97,28 +97,18 @@ fn watch_stop_signal(stop_signal: Arc<AtomicBool>, broker: Arc<RwLock<Broker>>) 
 
     let stop = stop_signal.clone();
     let broker = broker.clone();
-    std::thread::spawn(move || {
-        let ctx = zmq::Context::new();
-        let control = ctx.socket(zmq::PUB).unwrap();
-        control
-            .bind("tcp://127.0.0.1:6662")
-            .expect("failed connecting control");
-        loop {
-            if stop.load(Ordering::SeqCst) {
-                control
-                    .send("TERMINATE", 0)
-                    .expect("failed to send TERMINATE message");
-
-                broker
-                    .read()
-                    .expect("failed to acquire lock on broker to stop it")
-                    .stop()
-                    .expect("failed to stop broker");
-                println!("Bye, bye!");
-                process::exit(0);
-            }
-            thread::sleep(Duration::from_secs(1));
+    std::thread::spawn(move || loop {
+        if stop.load(Ordering::SeqCst) {
+            Broker::send_stop_signal().expect("failed to send stop signal to broker");
+            broker
+                .read()
+                .expect("failed to acquire lock on broker to stop it")
+                .stop()
+                .expect("failed to stop broker");
+            println!("Bye, bye!");
+            process::exit(0);
         }
+        thread::sleep(Duration::from_secs(1));
     });
 }
 

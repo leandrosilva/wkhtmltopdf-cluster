@@ -2,6 +2,7 @@ use super::error::Result;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command};
+use std::time::Duration;
 use std::{thread, time};
 use zmq;
 
@@ -39,8 +40,23 @@ impl Broker {
         Ok(())
     }
 
+    pub fn send_stop_signal() -> Result<()> {
+        let ctx = zmq::Context::new();
+        let control = ctx.socket(zmq::PUB).unwrap();
+        control
+            .bind("tcp://127.0.0.1:6662")
+            .expect("failed connecting control");
+        thread::sleep(Duration::from_secs(1));
+
+        control
+            .send("TERMINATE", 0)
+            .expect("failed to send TERMINATE message");
+        Ok(())
+    }
+
     pub fn stop(&self) -> Result<()> {
         // TODO: block requests, finish work in process, stop proxy and then workers
+        println!("Stopping...");
         Ok(())
     }
 
