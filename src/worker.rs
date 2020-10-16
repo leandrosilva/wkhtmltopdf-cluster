@@ -23,8 +23,8 @@ impl Worker {
         let ctx = zmq::Context::new();
         let subscriber = ctx.socket(zmq::REP).unwrap();
         subscriber
-            .connect("tcp://127.0.0.1:6666")
-            .expect("failed to listen on port 6666");
+            .connect("tcp://127.0.0.1:6661")
+            .expect("failed to listen on port 6661");
         let mut pdf_app = PdfApplication::new().expect("failed to init PDF application");
         on_ready();
         loop {

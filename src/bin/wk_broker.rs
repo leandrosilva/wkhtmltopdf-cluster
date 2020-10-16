@@ -1,6 +1,12 @@
 use clap::{App, Arg};
+use ctrlc;
 use std::env;
 use std::path::Path;
+use std::process;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, RwLock};
+use std::thread;
+use std::time::Duration;
 use wkhtmltopdf_cluster::broker::Broker;
 
 // $ cargo run -p wkhtmltopdf-cluster --bin broker start -i 2
@@ -43,6 +49,8 @@ fn main() {
                 ),
         );
 
+    let stop_signal: Arc<AtomicBool> = Arc::new(AtomicBool::new(false));
+
     let matches = app.get_matches_mut();
     match matches.subcommand() {
         ("start", Some(sub_matches)) => {
@@ -55,20 +63,63 @@ fn main() {
                 .unwrap_or_else(|_err| get_default_output_dir());
 
             println!("WkHTMLtoPDF Cluster :: Manager :: Start");
-            let mut broker = Broker::new(w_instances, Path::new(&w_binpath), Path::new(&w_output));
+            let broker = Arc::new(RwLock::new(Broker::new(
+                w_instances,
+                Path::new(&w_binpath),
+                Path::new(&w_output),
+            )));
+            watch_stop_signal(stop_signal.clone(), broker.clone());
             broker
+                .clone()
+                .write()
+                .expect("failed to acquire lock on broker to start it")
                 .start(|pids| {
                     println!("All workers are up & running:");
                     for pid in pids {
                         println!("- Worker PID: {}", pid);
                     }
                 })
-                .unwrap();
+                .expect("failed to start broker");
             println!("WkHTMLtoPDF Cluster :: Manager :: End");
         }
         ("", None) => app.print_help().unwrap(),
         _ => unreachable!(),
     }
+}
+
+fn watch_stop_signal(stop_signal: Arc<AtomicBool>, broker: Arc<RwLock<Broker>>) {
+    let stop = stop_signal.clone();
+    ctrlc::set_handler(move || {
+        println!("Received Ctrl+C\nShutting down...");
+        stop.store(true, Ordering::SeqCst);
+    })
+    .expect("Error setting Ctrl-C handler");
+
+    let stop = stop_signal.clone();
+    let broker = broker.clone();
+    std::thread::spawn(move || {
+        let ctx = zmq::Context::new();
+        let control = ctx.socket(zmq::PUB).unwrap();
+        control
+            .bind("tcp://127.0.0.1:6662")
+            .expect("failed connecting control");
+        loop {
+            if stop.load(Ordering::SeqCst) {
+                control
+                    .send("TERMINATE", 0)
+                    .expect("failed to send TERMINATE message");
+
+                broker
+                    .read()
+                    .expect("failed to acquire lock on broker to stop it")
+                    .stop()
+                    .expect("failed to stop broker");
+                println!("Bye, bye!");
+                process::exit(0);
+            }
+            thread::sleep(Duration::from_secs(1));
+        }
+    });
 }
 
 fn get_default_worker_path() -> String {

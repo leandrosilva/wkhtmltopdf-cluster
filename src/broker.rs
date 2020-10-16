@@ -69,19 +69,28 @@ fn start_proxy<F: Fn()>(on_ready: F) {
     let ctx = zmq::Context::new();
 
     // Socket facing clients
-    let frontend = ctx.socket(zmq::ROUTER).unwrap();
+    let mut frontend = ctx.socket(zmq::ROUTER).unwrap();
     frontend
-        .bind("tcp://127.0.0.1:9999")
+        .bind("tcp://127.0.0.1:6660")
         .expect("failed connecting frontend");
 
     // Socket facing workers
-    let backend = ctx.socket(zmq::DEALER).unwrap();
+    let mut backend = ctx.socket(zmq::DEALER).unwrap();
     backend
-        .bind("tcp://127.0.0.1:6666")
+        .bind("tcp://127.0.0.1:6661")
         .expect("failed connecting backend");
 
+    // Socket for controlling
+    let mut control = ctx.socket(zmq::SUB).unwrap();
+    control
+        .connect("tcp://127.0.0.1:6662")
+        .expect("failed connecting control");
+    control
+        .set_subscribe(b"")
+        .expect("failed subscribing to control");
+
     on_ready();
-    zmq::proxy(&frontend, &backend).expect("failed to start proxying");
+    zmq::proxy_steerable(&mut frontend, &mut backend, &mut control).expect("failed to start proxy");
 }
 
 // Unit testing
