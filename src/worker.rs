@@ -66,7 +66,7 @@ impl Worker {
     }
 
     pub fn stop(&self) -> Result<()> {
-        // TODO: whatever it takes
+        // TODO: not sure what, because it dies in face of a ctrl+c on broker
         Ok(())
     }
 }

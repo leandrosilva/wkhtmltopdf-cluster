@@ -98,8 +98,7 @@ impl Broker {
     }
 
     fn stop(&self) -> Result<()> {
-        // TODO: block requests, finish work in process, stop proxy and then workers
-        println!("Stopping...");
+        // TODO: not sure exactly what to do here now
         Ok(())
     }
     pub fn send_stop_signal() -> Result<()> {

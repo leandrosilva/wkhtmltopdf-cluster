@@ -87,10 +87,10 @@ fn main() {
 
 fn watch_stop_signal() {
     ctrlc::set_handler(move || {
-        println!("Received Ctrl+C\nShutting down...");
+        println!("[Ctrl+C]\nShutting down...");
         Broker::send_stop_signal().expect("failed to send stop signal to broker");
     })
-    .expect("Error setting Ctrl-C handler");
+    .expect("failed while setting Ctrl-C handler");
 }
 
 fn get_default_worker_path() -> String {
