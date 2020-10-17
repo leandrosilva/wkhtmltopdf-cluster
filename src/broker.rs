@@ -4,6 +4,7 @@ use std::path::{Path, PathBuf};
 use std::process::{Child, Command};
 use std::time::Duration;
 use std::{thread, time};
+use sysinfo::{ProcessExt, System, SystemExt};
 use zmq;
 
 #[derive(Debug)]
@@ -14,6 +15,7 @@ struct WorkerRef {
 
 #[derive(Debug)]
 pub struct Broker {
+    pub id: u32,
     pub worker_instances: usize,
     pub worker_binpath: PathBuf,
     pub worker_outpath: PathBuf,
@@ -21,8 +23,14 @@ pub struct Broker {
 }
 
 impl Broker {
-    pub fn new(worker_instances: usize, worker_binpath: &Path, worker_outpath: &Path) -> Broker {
+    pub fn new(
+        id: u32,
+        worker_instances: usize,
+        worker_binpath: &Path,
+        worker_outpath: &Path,
+    ) -> Broker {
         let instance = Broker {
+            id: id,
             worker_instances: worker_instances,
             worker_binpath: PathBuf::from(worker_binpath),
             worker_outpath: PathBuf::from(worker_outpath),
@@ -39,6 +47,7 @@ impl Broker {
 
     fn start<F: Fn(Vec<u32>)>(&mut self, on_ready: F) -> Result<()> {
         self.start_workers().expect("failed to start workers");
+        self.watch_workers().expect("failed watching processess");
         self.start_proxy(|| {
             let pids = self.running_workers.iter().map(|kv| *kv.0).collect();
             // workers are ready, so notify it
@@ -97,10 +106,41 @@ impl Broker {
         Ok(())
     }
 
-    fn stop(&self) -> Result<()> {
-        // TODO: not sure exactly what to do here now
+    fn watch_workers(&self) -> Result<()> {
+        let id = self.id as usize;
+        let worker_exe = self
+            .worker_binpath
+            .file_name()
+            .unwrap()
+            .to_owned()
+            .into_string()
+            .unwrap();
+
+        std::thread::spawn(move || loop {
+            println!("-->");
+            let sys = System::new_all();
+            for (pid, process) in sys.get_processes() {
+                if process.name().contains(worker_exe.as_str()) {
+                    if let Some(parent) = process.parent() {
+                        if parent == id {
+                            println!(
+                                "[{}:{}] {} {}kB {}%",
+                                parent,
+                                pid,
+                                process.name(),
+                                process.memory(),
+                                process.cpu_usage()
+                            );
+                        }
+                    }
+                }
+            }
+            println!("<--");
+            thread::sleep(Duration::from_secs(5));
+        });
         Ok(())
     }
+
     pub fn send_stop_signal() -> Result<()> {
         let ctx = zmq::Context::new();
         let control = ctx.socket(zmq::PUB).unwrap();
@@ -114,6 +154,11 @@ impl Broker {
             Err(reason) => Err(AnyError::from(reason)),
         }
     }
+
+    fn stop(&self) -> Result<()> {
+        // TODO: not sure exactly what to do here now
+        Ok(())
+    }
 }
 
 // Unit testing
@@ -125,7 +170,7 @@ mod tests {
 
     #[test]
     fn create_broker() {
-        let broker = Broker::new(2, Path::new("bin"), Path::new("out"));
+        let broker = Broker::new(0, 2, Path::new("bin"), Path::new("out"));
         assert_eq!(broker.worker_instances, 2);
         assert_eq!(broker.worker_binpath.as_os_str(), "bin");
         assert_eq!(broker.worker_outpath.as_os_str(), "out");

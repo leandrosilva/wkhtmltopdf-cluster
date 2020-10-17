@@ -59,8 +59,11 @@ fn main() {
                 .value_of_t("output")
                 .unwrap_or_else(|_err| get_default_output_dir());
 
+            let broker_id = process::id();
+
             println!("WkHTMLtoPDF Cluster :: Manager :: Start");
             let broker = Arc::new(RwLock::new(Broker::new(
+                broker_id, 
                 w_instances,
                 Path::new(&w_binpath),
                 Path::new(&w_output),
