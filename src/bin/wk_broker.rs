@@ -3,10 +3,7 @@ use ctrlc;
 use std::env;
 use std::path::Path;
 use std::process;
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, RwLock};
-use std::thread;
-use std::time::Duration;
 use wkhtmltopdf_cluster::broker::Broker;
 
 // $ cargo run -p wkhtmltopdf-cluster --bin broker start -i 2
@@ -49,8 +46,7 @@ fn main() {
                 ),
         );
 
-    let stop_signal: Arc<AtomicBool> = Arc::new(AtomicBool::new(false));
-    watch_stop_signal(stop_signal.clone());
+    watch_stop_signal();
 
     let matches = app.get_matches_mut();
     match matches.subcommand() {
@@ -79,7 +75,7 @@ fn main() {
                         println!("- Worker PID: {}", pid);
                     }
                 })
-                .expect("failed to start broker");
+                .expect("failed on running broker");
             println!("WkHTMLtoPDF Cluster :: Manager :: End");
             println!("Bye, bye!");
             process::exit(0);
@@ -89,21 +85,12 @@ fn main() {
     }
 }
 
-fn watch_stop_signal(stop_signal: Arc<AtomicBool>) {
-    let stop = stop_signal.clone();
+fn watch_stop_signal() {
     ctrlc::set_handler(move || {
         println!("Received Ctrl+C\nShutting down...");
-        stop.store(true, Ordering::SeqCst);
+        Broker::send_stop_signal().expect("failed to send stop signal to broker");
     })
     .expect("Error setting Ctrl-C handler");
-
-    let stop = stop_signal.clone();
-    std::thread::spawn(move || loop {
-        if stop.load(Ordering::SeqCst) {
-            Broker::send_stop_signal().expect("failed to send stop signal to broker");
-        }
-        thread::sleep(Duration::from_secs(1));
-    });
 }
 
 fn get_default_worker_path() -> String {

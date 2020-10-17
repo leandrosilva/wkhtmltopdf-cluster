@@ -19,14 +19,17 @@ impl Worker {
         instance
     }
 
-    pub fn start<F: Fn()>(&mut self, on_ready: F) -> Result<()> {
+    pub fn run<F: Fn()>(&mut self, on_ready: F) -> Result<()> {
         let ctx = zmq::Context::new();
         let subscriber = ctx.socket(zmq::REP).unwrap();
         subscriber
             .connect("tcp://127.0.0.1:6661")
-            .expect("failed to listen on port 6661");
+            .expect("failed listening on port 6661");
         let mut pdf_app = PdfApplication::new().expect("failed to init PDF application");
+
+        // worker is ready, so notify it
         on_ready();
+
         loop {
             let message = subscriber
                 .recv_string(0)

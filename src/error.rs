@@ -17,14 +17,14 @@ pub struct AnyError {
 }
 
 impl AnyError {
-    fn new(details: &str, reason: OptError) -> Self {
+    pub fn new(details: &str, reason: OptError) -> Self {
         AnyError {
             details: details.to_string(),
             parent: reason,
         }
     }
 
-    fn without_parent(details: &str) -> Self {
+    pub fn without_parent(details: &str) -> Self {
         AnyError::new(details, None)
     }
 }

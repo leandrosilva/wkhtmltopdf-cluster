@@ -41,6 +41,7 @@ impl Broker {
         self.start_workers().expect("failed to start workers");
         self.start_proxy(|| {
             let pids = self.running_workers.iter().map(|kv| *kv.0).collect();
+            // workers are ready, so notify it
             on_ready(pids);
         })
         .expect("failed to start proxy");
@@ -69,29 +70,31 @@ impl Broker {
 
     fn start_proxy<F: Fn()>(&self, on_ready: F) -> Result<()> {
         let ctx = zmq::Context::new();
-        // Socket facing clients
+
         let mut frontend = ctx.socket(zmq::ROUTER).unwrap();
         frontend
             .bind("tcp://127.0.0.1:6660")
-            .expect("failed connecting frontend");
-        // Socket facing workers
+            .expect("failed binding frontend socket");
+
         let mut backend = ctx.socket(zmq::DEALER).unwrap();
         backend
             .bind("tcp://127.0.0.1:6661")
-            .expect("failed connecting backend");
-        // Socket for controlling
+            .expect("failed binding backend socket");
+
         let mut control = ctx.socket(zmq::SUB).unwrap();
         control
             .connect("tcp://127.0.0.1:6662")
-            .expect("failed connecting control");
+            .expect("failed connecting control socket");
         control
             .set_subscribe(b"")
-            .expect("failed subscribing to control");
+            .expect("failed subscribing to control socket");
+
+        // ready to start proxying, so notify it
         on_ready();
-        match zmq::proxy_steerable(&mut frontend, &mut backend, &mut control) {
-            Ok(()) => Ok(()),
-            Err(reason) => Err(AnyError::from(reason)),
-        }
+
+        zmq::proxy_steerable(&mut frontend, &mut backend, &mut control)
+            .expect("failed on proxying");
+        Ok(())
     }
 
     fn stop(&self) -> Result<()> {

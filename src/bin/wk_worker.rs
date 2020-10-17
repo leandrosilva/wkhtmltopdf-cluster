@@ -37,8 +37,10 @@ fn main() {
             println!("WkHTMLtoPDF Cluster :: Worker :: Start [#{}]", worker_id);
             let mut worker = Worker::new(worker_id, output_dir);
             worker
-                .start(|| println!("- Worker #{} is ready", worker_id))
-                .expect("failed to start up worker");
+                .run(|| {
+                    println!("- Worker #{} is ready", worker_id)
+                })
+                .expect("failed running worker");
             println!("WkHTMLtoPDF Cluster :: Worker :: End [#{}]", worker_id);
         }
         ("", None) => app.print_help().unwrap(),
