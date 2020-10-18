@@ -1,7 +1,7 @@
 use super::error::{AnyError, Result};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
-use std::process::{Child, Command};
+use std::process::{Child, Command, Stdio};
 use std::time::Duration;
 use std::{thread, time};
 use sysinfo::{ProcessExt, System, SystemExt};
@@ -63,6 +63,8 @@ impl Broker {
                 .arg("start")
                 .arg("--output")
                 .arg(&self.worker_outpath.to_str().unwrap())
+                .stdout(Stdio::inherit())
+                .stderr(Stdio::null())
                 .spawn()
                 .expect(format!("failed to start #{} {:?}", i, self.worker_binpath).as_str());
             self.running_workers.insert(
@@ -108,7 +110,7 @@ impl Broker {
 
     fn watch_workers(&self) -> Result<()> {
         let id = self.id as usize;
-        let worker_exe = self
+        let worker_exec = self
             .worker_binpath
             .file_name()
             .unwrap()
@@ -120,7 +122,7 @@ impl Broker {
             println!("-->");
             let sys = System::new_all();
             for (pid, process) in sys.get_processes() {
-                if process.name().contains(worker_exe.as_str()) {
+                if process.name().contains(worker_exec.as_str()) {
                     if let Some(parent) = process.parent() {
                         if parent == id {
                             println!(
