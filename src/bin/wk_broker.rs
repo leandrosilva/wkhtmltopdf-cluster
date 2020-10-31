@@ -46,8 +46,6 @@ fn main() {
                 ),
         );
 
-    watch_stop_signal();
-
     let matches = app.get_matches_mut();
     match matches.subcommand() {
         ("start", Some(sub_matches)) => {
@@ -59,11 +57,13 @@ fn main() {
                 .value_of_t("output")
                 .unwrap_or_else(|_err| get_default_output_dir());
 
+            watch_stop_signal(w_instances);
+
             let broker_id = process::id();
 
             println!("WkHTMLtoPDF Cluster :: Manager :: Start");
             let broker = Arc::new(RwLock::new(Broker::new(
-                broker_id, 
+                broker_id,
                 w_instances,
                 Path::new(&w_binpath),
                 Path::new(&w_output),
@@ -72,10 +72,10 @@ fn main() {
                 .clone()
                 .write()
                 .expect("failed to acquire lock on broker to start it")
-                .run(|pids| {
+                .run(|worker_pids| {
                     println!("All workers are up & running:");
-                    for pid in pids {
-                        println!("- Worker PID: {}", pid);
+                    for worker_pid in worker_pids {
+                        println!("- Worker PID: {}", worker_pid);
                     }
                 })
                 .expect("failed on running broker");
@@ -88,10 +88,17 @@ fn main() {
     }
 }
 
-fn watch_stop_signal() {
+fn watch_stop_signal(w_instances: usize) {
+    let mut got_signal_yet = false;
     ctrlc::set_handler(move || {
-        println!("[Ctrl+C]\nShutting down...");
-        Broker::send_stop_signal().expect("failed to send stop signal to broker");
+        if !got_signal_yet {
+            println!("[Ctrl+C]\nShutting down...");
+            Broker::send_stop_signal(w_instances, 5).expect("failed to send stop signal to broker");
+            got_signal_yet = true;
+            return;
+        }
+        println!("Bye, bye!");
+        process::exit(0);
     })
     .expect("failed while setting Ctrl-C handler");
 }

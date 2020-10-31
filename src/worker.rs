@@ -41,7 +41,10 @@ impl Worker {
                     .unwrap();
                 println!("[#{}] Message: {}", self.id, message);
 
-                if message.to_uppercase() == "END" {
+                if message.to_uppercase() == "STOP" {
+                    subscriber
+                        .send(format!("[#{}] Shutting down", self.id).as_str(), 0)
+                        .expect("failed to send STOP response");
                     break;
                 }
 
