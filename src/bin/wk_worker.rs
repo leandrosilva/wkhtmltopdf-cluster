@@ -26,6 +26,8 @@ fn main() {
                 ),
         );
 
+    watch_stop_signal();
+
     let matches = app.get_matches_mut();
     match matches.subcommand() {
         ("start", Some(sub_matches)) => {
@@ -37,13 +39,27 @@ fn main() {
             println!("WkHTMLtoPDF Cluster :: Worker :: Start [#{}]", worker_id);
             let mut worker = Worker::new(worker_id, output_dir);
             worker
-                .run(|| {
-                    println!("- Worker #{} is ready", worker_id)
-                })
+                .run(|| println!("- Worker #{} is ready", worker_id))
                 .expect("failed running worker");
             println!("WkHTMLtoPDF Cluster :: Worker :: End [#{}]", worker_id);
+            process::exit(0);
         }
         ("", None) => app.print_help().unwrap(),
         _ => unreachable!(),
     }
+}
+
+fn watch_stop_signal() {
+    let worker_id = process::id();
+    let mut got_signal_yet = false;
+    ctrlc::set_handler(move || {
+        if !got_signal_yet {
+            println!("[Ctrl+C]\nWorker #{} got stop signal", worker_id);
+            got_signal_yet = true;
+            return;
+        }
+        println!("Worker #{} say au revoir", worker_id);
+        process::exit(0);
+    })
+    .expect("failed while setting Ctrl-C handler");
 }
