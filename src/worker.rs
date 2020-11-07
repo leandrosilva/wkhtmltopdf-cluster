@@ -25,6 +25,8 @@ impl Worker {
         subscriber
             .connect("tcp://127.0.0.1:6661")
             .expect("failed listening on port 6661");
+        subscriber.set_rcvtimeo(1000)?;
+        subscriber.set_sndtimeo(1000)?;
 
         // Enclosing scope for PdfApplication
         {
@@ -34,11 +36,13 @@ impl Worker {
             on_ready();
 
             loop {
-                // grap some work to do...
-                let message = subscriber
-                    .recv_string(0)
-                    .expect("failed receiving message")
-                    .unwrap();
+                println!("<<keep running?>>");
+
+                // grap some work to do...               
+                let message = match subscriber.recv_string(0) {
+                    Ok(received) => received.unwrap(),
+                    Err(_) => continue
+                };
                 println!("[#{}] Message: {}", self.id, message);
 
                 if message.to_uppercase() == "STOP" {
