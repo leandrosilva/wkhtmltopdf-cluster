@@ -10,12 +10,14 @@ msg = 'https://www.google.com.br'
 if len(sys.argv) > 1:
     msg = sys.argv[1]
 
-try:
-    req.send_string(msg)
-    print('REQ:', msg)
+for i in range(1, 11):
+    print(">>", i)
+    try:
+        req.send_string(msg)
+        print('REQ:', msg)
 
-    resp = req.recv_string()
-    print('RESP:', resp)
-except Exception as e:
-    print(e)
-    quit(666)
+        resp = req.recv_string()
+        print('RESP:', resp)
+    except Exception as e:
+        print(e)
+        quit(666)
