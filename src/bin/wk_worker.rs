@@ -3,6 +3,8 @@ use std::path::Path;
 use std::process;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
+use std::thread;
+use std::time::Duration;
 use wkhtmltopdf_cluster::helpers::create_dir_if_not_exists;
 use wkhtmltopdf_cluster::worker::Worker;
 
@@ -58,6 +60,15 @@ fn watch_stop_signal(stop_signal: Arc<AtomicBool>) {
         if !stop_signal.load(Ordering::SeqCst) {
             println!("[#{}] Worker got stop signal (Ctrl+C)", worker_id);
             stop_signal.store(true, Ordering::SeqCst);
+
+            thread::spawn(move || {
+                // TODO: get this tolerance from user on start up
+                println!("[#{}] Will await for 5 secs max...", worker_id);
+                thread::sleep(Duration::from_secs(5));
+                println!("[#{}] Forced quit!", worker_id);
+                process::exit(666);
+            });
+
             return;
         }
         println!("Worker #{} say au revoir", worker_id);

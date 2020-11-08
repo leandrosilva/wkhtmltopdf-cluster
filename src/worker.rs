@@ -1,8 +1,8 @@
 use super::error::Result;
 use std::path::{Path, PathBuf};
-use std::time::{SystemTime, UNIX_EPOCH};
-use std::sync::{Arc};
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
+use std::time::{SystemTime, UNIX_EPOCH};
 use wkhtmltopdf::{Orientation, PdfApplication, Size};
 use zmq;
 
@@ -10,7 +10,7 @@ use zmq;
 pub struct Worker {
     id: u32,
     stop_signal: Arc<AtomicBool>,
-    output_dir: PathBuf
+    output_dir: PathBuf,
 }
 
 impl Worker {
@@ -24,6 +24,13 @@ impl Worker {
     }
 
     pub fn run<F: Fn()>(&mut self, on_ready: F) -> Result<()> {
+        println!(">>> {} before event loop", self.id);
+        let result = self.run_eventloop(on_ready);
+        println!("<<< {} after event loop", self.id);
+        result
+    }
+
+    fn run_eventloop<F: Fn()>(&mut self, on_ready: F) -> Result<()> {
         let ctx = zmq::Context::new();
         let subscriber = ctx.socket(zmq::REP).unwrap();
         subscriber
@@ -46,10 +53,10 @@ impl Worker {
                     break;
                 }
 
-                // grap some work to do...               
+                // grap some work to do...
                 let message = match subscriber.recv_string(0) {
                     Ok(received) => received.unwrap(),
-                    Err(_) => continue
+                    Err(_) => continue,
                 };
                 println!("[#{}] Message: {}", self.id, message);
 
@@ -74,18 +81,27 @@ impl Worker {
                 };
                 let filepath = self
                     .output_dir
-                    .join(Path::new(format!("google-{}.pdf", message_id).as_str()));
-                let mut pdfout = pdf_app
-                    .builder()
-                    .orientation(Orientation::Landscape)
-                    .margin(Size::Inches(2))
-                    .title("A taste of WkHTMLtoPDF Cluster")
-                    .build_from_url(url)
-                    .expect(format!("failed to build {}", filepath.to_str().unwrap()).as_str());
-                pdfout
-                    .save(&filepath)
-                    .expect(format!("failed to save {}", filepath.to_str().unwrap()).as_str());
-                println!("[#{}] Generated PDF saved as: {}", self.id, filepath.to_str().unwrap());
+                    .join(Path::new(format!("req-{}-{}.pdf", self.id, message_id).as_str()));
+                unsafe {
+                    let mut pdfout = pdf_app
+                        .builder()
+                        .orientation(Orientation::Landscape)
+                        .margin(Size::Inches(2))
+                        .title("A taste of WkHTMLtoPDF Cluster")
+                        .object_setting("load.windowStatus", "ready")
+                        .build_from_url(url)
+                        .expect(
+                            format!("failed to build {}", filepath.to_str().unwrap()).as_str(),
+                        );
+                    pdfout.save(&filepath).expect(
+                        format!("failed to save {}", filepath.to_str().unwrap()).as_str(),
+                    );
+                }
+                println!(
+                    "[#{}] Built PDF is saved as: {}",
+                    self.id,
+                    filepath.to_str().unwrap()
+                );
                 subscriber
                     .send(
                         format!("[#{}] PDF saved at output directory", self.id).as_str(),
@@ -124,7 +140,8 @@ mod tests {
 
     #[test]
     fn create_worker() {
-        let worker = Worker::new(123, Path::new("out"));
+        let stop_signal = Arc::new(AtomicBool::new(false));
+        let worker = Worker::new(123, stop_signal.clone(), Path::new("out"));
         assert_eq!(worker.id, 123);
         assert_eq!(worker.output_dir.as_os_str(), "out");
     }
