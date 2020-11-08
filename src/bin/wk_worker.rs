@@ -1,6 +1,8 @@
 use clap::{App, Arg};
 use std::path::Path;
 use std::process;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
 use wkhtmltopdf_cluster::helpers::create_dir_if_not_exists;
 use wkhtmltopdf_cluster::worker::Worker;
 
@@ -26,7 +28,8 @@ fn main() {
                 ),
         );
 
-    watch_stop_signal();
+    let stop_signal = Arc::new(AtomicBool::new(false));
+    watch_stop_signal(stop_signal.clone());
 
     let matches = app.get_matches_mut();
     match matches.subcommand() {
@@ -37,7 +40,7 @@ fn main() {
             let worker_id = process::id();
 
             println!("WkHTMLtoPDF Cluster :: Worker :: Start [#{}]", worker_id);
-            let mut worker = Worker::new(worker_id, output_dir);
+            let mut worker = Worker::new(worker_id, stop_signal.clone(), output_dir);
             worker
                 .run(|| println!("- Worker #{} is ready", worker_id))
                 .expect("failed running worker");
@@ -49,13 +52,12 @@ fn main() {
     }
 }
 
-fn watch_stop_signal() {
+fn watch_stop_signal(stop_signal: Arc<AtomicBool>) {
     let worker_id = process::id();
-    let mut got_signal_yet = false;
     ctrlc::set_handler(move || {
-        if !got_signal_yet {
-            println!("[Ctrl+C]\nWorker #{} got stop signal", worker_id);
-            got_signal_yet = true;
+        if !stop_signal.load(Ordering::SeqCst) {
+            println!("[#{}] Worker got stop signal (Ctrl+C)", worker_id);
+            stop_signal.store(true, Ordering::SeqCst);
             return;
         }
         println!("Worker #{} say au revoir", worker_id);

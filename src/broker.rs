@@ -143,40 +143,16 @@ impl Broker {
         Ok(())
     }
 
-    pub fn send_stop_signal(worker_instances: usize, graceful_time: u64) -> Result<()> {
-        let ctx = zmq::Context::new();
-
-        println!("Will send STOP to {} worker(s)", graceful_time);
-        Self::send_stop_signal_to_workers(&ctx, worker_instances)?;
-
-        println!("Will give them time to gracefully shutdown");
+    pub fn send_stop_signal(graceful_time: u64) -> Result<()> {
+        println!("Will give workers time to gracefully shutdown");
         thread::sleep(Duration::from_secs(graceful_time));
 
         println!("Will terminate socket now");
-        Self::send_stop_signal_to_control_socket(&ctx)
+        Self::send_stop_signal_to_control_socket()
     }
 
-    fn send_stop_signal_to_workers(ctx: &zmq::Context, worker_instances: usize) -> Result<()> {
-        let stop_cmd = ctx.socket(zmq::REQ).unwrap();
-        stop_cmd
-            .connect("tcp://127.0.0.1:6660")
-            .expect("failed connecting as client");
-        thread::sleep(Duration::from_secs(1));
-
-        for i in 0..worker_instances {
-            if let Err(reason) = stop_cmd.send("STOP", 0) {
-                return Err(AnyError::from(reason));
-            };
-            let resp = stop_cmd
-                .recv_string(0)
-                .expect("failed to receive STOP response")
-                .expect("could not parse STOP response");
-            println!("Sent STOP to worker ({}) and got: {}", i + 1, resp);
-        }
-        Ok(())
-    }
-
-    fn send_stop_signal_to_control_socket(ctx: &zmq::Context) -> Result<()> {
+    fn send_stop_signal_to_control_socket() -> Result<()> {
+        let ctx = zmq::Context::new();
         let control = ctx.socket(zmq::PUB).unwrap();
         control
             .bind("tcp://127.0.0.1:6662")

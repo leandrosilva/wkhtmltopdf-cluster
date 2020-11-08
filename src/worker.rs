@@ -1,19 +1,23 @@
 use super::error::Result;
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
+use std::sync::{Arc};
+use std::sync::atomic::{AtomicBool, Ordering};
 use wkhtmltopdf::{Orientation, PdfApplication, Size};
 use zmq;
 
 #[derive(Debug)]
 pub struct Worker {
     id: u32,
-    output_dir: PathBuf,
+    stop_signal: Arc<AtomicBool>,
+    output_dir: PathBuf
 }
 
 impl Worker {
-    pub fn new(id: u32, output_dir: &Path) -> Worker {
+    pub fn new(id: u32, stop_signal: Arc<AtomicBool>, output_dir: &Path) -> Worker {
         let instance = Worker {
             id: id,
+            stop_signal: stop_signal,
             output_dir: PathBuf::from(output_dir),
         };
         instance
@@ -36,7 +40,11 @@ impl Worker {
             on_ready();
 
             loop {
-                println!("<<keep running?>>");
+                // got stop signal?
+                let should_stop = self.stop_signal.load(Ordering::SeqCst);
+                if should_stop {
+                    break;
+                }
 
                 // grap some work to do...               
                 let message = match subscriber.recv_string(0) {
@@ -77,7 +85,7 @@ impl Worker {
                 pdfout
                     .save(&filepath)
                     .expect(format!("failed to save {}", filepath.to_str().unwrap()).as_str());
-                println!("Generated PDF saved as: {}", filepath.to_str().unwrap());
+                println!("[#{}] Generated PDF saved as: {}", self.id, filepath.to_str().unwrap());
                 subscriber
                     .send(
                         format!("[#{}] PDF saved at output directory", self.id).as_str(),
