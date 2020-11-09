@@ -1,4 +1,5 @@
 use super::error::Result;
+use std::ops::Deref;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, RwLock};
@@ -16,8 +17,10 @@ pub struct Worker {
 
 pub struct EventLoopInput {
     worker: Arc<RwLock<Worker>>,
-    on_ready: Arc<dyn Fn()>,
+    on_ready: Arc<RwLock<dyn Fn() + Send + Sync>>,
 }
+
+unsafe impl Send for Worker {}
 
 impl Worker {
     pub fn new(id: u32, stop_signal: Arc<AtomicBool>, output_dir: &Path) -> Worker {
@@ -29,12 +32,12 @@ impl Worker {
         instance
     }
 
-    pub fn run_worker<F: 'static + Fn()>(this: Self, on_ready: F) -> Result<()> {
+    pub fn run_worker<F: 'static + Fn() + Send + Sync>(this: Self, on_ready: F) -> Result<()> {
         let id = this.id;
         println!(">>> {} before event loop", id);
         let input = EventLoopInput {
             worker: Arc::new(RwLock::new(this)),
-            on_ready: Arc::new(on_ready),
+            on_ready: Arc::new(RwLock::new(on_ready)),
         };
         let result = Self::run_worker_eventloop(&input);
         println!("<<< {} after event loop", id);
@@ -42,12 +45,17 @@ impl Worker {
     }
 
     fn run_worker_eventloop(input: &EventLoopInput) -> Result<()> {
-        let mut worker = input
-            .worker
-            .write()
-            .expect("faild to acquire writing lock of worker");
-        let on_ready = input.on_ready.clone();
-        let event_loop_handle = thread::spawn(move || worker.run_eventloop(on_ready.as_ref()));
+        let local_worker = input.worker.clone();
+        let local_on_ready = input.on_ready.clone();
+        let event_loop_handle = thread::spawn(move || {
+            let mut worker = local_worker
+                .write()
+                .expect("faild to acquire writing lock of worker");
+            let on_ready = local_on_ready
+                .read()
+                .expect("failed to acquire read lock on on_ready callback");
+            worker.run_eventloop(on_ready.deref())
+        });
         let result = event_loop_handle
             .join()
             .expect("failed to join event loop thread");
@@ -61,7 +69,7 @@ impl Worker {
         result
     }
 
-    fn run_eventloop<F: Fn()>(&mut self, on_ready: F) -> Result<()> {
+    fn run_eventloop<'a, F: 'a + Fn()>(&'a mut self, on_ready: F) -> Result<()> {
         let ctx = zmq::Context::new();
         let subscriber = ctx.socket(zmq::REP).unwrap();
         subscriber
