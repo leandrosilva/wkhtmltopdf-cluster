@@ -5,7 +5,7 @@ use std::process;
 use std::convert::From;
 use zmq;
 
-type DynError = Box<dyn Error>;
+type DynError = Box<dyn Error + Send>;
 type OptError = Option<DynError>;
 
 pub type Result<T> = std::result::Result<T, AnyError>;
@@ -52,7 +52,7 @@ impl From<zmq::Error> for AnyError {
     }
 }
 
-pub fn error<T, U: 'static + Error>(message: &str, reason: U) -> Result<T> {
+pub fn error<T, U: 'static + Error + Send>(message: &str, reason: U) -> Result<T> {
     Err(AnyError::new(&message, Some(Box::new(reason))))
 }
 
