@@ -34,20 +34,19 @@ impl Worker {
     }
 
     pub fn run<'a, F: 'a + Fn()>(&'a mut self, on_ready: F) -> Result<()> {
-        println!(">>> {} before event loop", self.id);
-        // heartbeat monitoring setup
+        let (heartbeat_tx, heartbeat_rx) = channel::<()>();
+        self.spawn_heartbeat_monitoring(heartbeat_rx);
+        self.run_eventloop(heartbeat_tx, on_ready)
+    }
+
+    fn spawn_heartbeat_monitoring(&self, heartbeat_rx: Receiver<()>) {
         let local_id = self.id;
         let local_timeout = self.timeout;
         let local_stop_signal = self.stop_signal.clone();
-        let (heartbeat_tx, heartbeat_rx) = channel::<()>();
+
         thread::spawn(move || {
             Self::heartbeat_monitoring(local_id, local_stop_signal, heartbeat_rx, local_timeout);
         });
-
-        // loop 'til close to forever or whatever
-        let result = self.run_eventloop(heartbeat_tx, on_ready);
-        println!("<<< {} after event loop", self.id);
-        result
     }
 
     fn heartbeat_monitoring(
@@ -184,7 +183,12 @@ mod tests {
     #[test]
     fn create_worker() {
         let stop_signal = Arc::new(AtomicBool::new(false));
-        let worker = Worker::new(123, stop_signal.clone(), Path::new("out"));
+        let worker = Worker::new(
+            123,
+            stop_signal.clone(),
+            Path::new("out"),
+            Duration::from_secs(3),
+        );
         assert_eq!(worker.id, 123);
         assert_eq!(worker.output_dir.as_os_str(), "out");
     }
