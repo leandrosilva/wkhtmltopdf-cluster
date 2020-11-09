@@ -1,7 +1,8 @@
 use super::error::Result;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::Arc;
+use std::sync::{Arc, RwLock};
+use std::thread;
 use std::time::{SystemTime, UNIX_EPOCH};
 use wkhtmltopdf::{Orientation, PdfApplication, Size};
 use zmq;
@@ -11,6 +12,11 @@ pub struct Worker {
     id: u32,
     stop_signal: Arc<AtomicBool>,
     output_dir: PathBuf,
+}
+
+pub struct EventLoopInput {
+    worker: Arc<RwLock<Worker>>,
+    on_ready: Arc<dyn Fn()>,
 }
 
 impl Worker {
@@ -23,7 +29,32 @@ impl Worker {
         instance
     }
 
-    pub fn run<F: Fn()>(&mut self, on_ready: F) -> Result<()> {
+    pub fn run_worker<F: 'static + Fn()>(this: Self, on_ready: F) -> Result<()> {
+        let id = this.id;
+        println!(">>> {} before event loop", id);
+        let input = EventLoopInput {
+            worker: Arc::new(RwLock::new(this)),
+            on_ready: Arc::new(on_ready),
+        };
+        let result = Self::run_worker_eventloop(&input);
+        println!("<<< {} after event loop", id);
+        result
+    }
+
+    fn run_worker_eventloop(input: &EventLoopInput) -> Result<()> {
+        let mut worker = input
+            .worker
+            .write()
+            .expect("faild to acquire writing lock of worker");
+        let on_ready = input.on_ready.clone();
+        let event_loop_handle = thread::spawn(move || worker.run_eventloop(on_ready.as_ref()));
+        let result = event_loop_handle
+            .join()
+            .expect("failed to join event loop thread");
+        result
+    }
+
+    pub fn run<'a, F: 'a + Fn()>(&'a mut self, on_ready: F) -> Result<()> {
         println!(">>> {} before event loop", self.id);
         let result = self.run_eventloop(on_ready);
         println!("<<< {} after event loop", self.id);
@@ -79,9 +110,9 @@ impl Worker {
                         continue;
                     }
                 };
-                let filepath = self
-                    .output_dir
-                    .join(Path::new(format!("req-{}-{}.pdf", self.id, message_id).as_str()));
+                let filepath = self.output_dir.join(Path::new(
+                    format!("req-{}-{}.pdf", self.id, message_id).as_str(),
+                ));
                 unsafe {
                     let mut pdfout = pdf_app
                         .builder()
@@ -90,12 +121,10 @@ impl Worker {
                         .title("A taste of WkHTMLtoPDF Cluster")
                         .object_setting("load.windowStatus", "ready")
                         .build_from_url(url)
-                        .expect(
-                            format!("failed to build {}", filepath.to_str().unwrap()).as_str(),
-                        );
-                    pdfout.save(&filepath).expect(
-                        format!("failed to save {}", filepath.to_str().unwrap()).as_str(),
-                    );
+                        .expect(format!("failed to build {}", filepath.to_str().unwrap()).as_str());
+                    pdfout
+                        .save(&filepath)
+                        .expect(format!("failed to save {}", filepath.to_str().unwrap()).as_str());
                 }
                 println!(
                     "[#{}] Built PDF is saved as: {}",
