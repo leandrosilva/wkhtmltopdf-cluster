@@ -14,14 +14,21 @@ pub struct Worker {
     id: u32,
     stop_signal: Arc<AtomicBool>,
     output_dir: PathBuf,
+    timeout: Duration,
 }
 
 impl Worker {
-    pub fn new(id: u32, stop_signal: Arc<AtomicBool>, output_dir: &Path) -> Worker {
+    pub fn new(
+        id: u32,
+        stop_signal: Arc<AtomicBool>,
+        output_dir: &Path,
+        timeout: Duration,
+    ) -> Worker {
         let instance = Worker {
             id: id,
             stop_signal: stop_signal,
             output_dir: PathBuf::from(output_dir),
+            timeout: timeout,
         };
         instance
     }
@@ -29,11 +36,12 @@ impl Worker {
     pub fn run<'a, F: 'a + Fn()>(&'a mut self, on_ready: F) -> Result<()> {
         println!(">>> {} before event loop", self.id);
         // heartbeat monitoring setup
-        let id = self.id;
+        let local_id = self.id;
+        let local_timeout = self.timeout;
         let local_stop_signal = self.stop_signal.clone();
         let (heartbeat_tx, heartbeat_rx) = channel::<()>();
         thread::spawn(move || {
-            Self::heartbeat_monitoring(id, local_stop_signal, heartbeat_rx);
+            Self::heartbeat_monitoring(local_id, local_stop_signal, heartbeat_rx, local_timeout);
         });
 
         // loop 'til close to forever or whatever
@@ -42,10 +50,19 @@ impl Worker {
         result
     }
 
-    fn heartbeat_monitoring(id: u32, stop_signal: Arc<AtomicBool>, heartbeat_rx: Receiver<()>) {
+    fn heartbeat_monitoring(
+        id: u32,
+        stop_signal: Arc<AtomicBool>,
+        heartbeat_rx: Receiver<()>,
+        timeout: Duration,
+    ) {
         while !stop_signal.load(Ordering::SeqCst) {
-            if heartbeat_rx.recv_timeout(Duration::from_secs(3)).is_err() {
-                println!("[#{}] Worker is hugging and will be killed now", id);
+            if heartbeat_rx.recv_timeout(timeout).is_err() {
+                println!(
+                    "[#{}] Worker is hugging for more than {}s and will be killed now",
+                    id,
+                    timeout.as_secs()
+                );
                 process::exit(666);
             }
         }

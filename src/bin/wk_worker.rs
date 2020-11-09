@@ -27,6 +27,15 @@ fn main() {
                         .takes_value(true)
                         .value_name("DIR")
                         .required(true),
+                )
+                .arg(
+                    Arg::with_name("timeout")
+                        .about("max seconds per request")
+                        .short('t')
+                        .long("timeout")
+                        .takes_value(true)
+                        .value_name("TIMEOUT")
+                        .default_value("5"),
                 ),
         );
 
@@ -39,10 +48,18 @@ fn main() {
             let output_dir = Path::new(sub_matches.value_of("output").unwrap());
             create_dir_if_not_exists(&output_dir).expect("failed to create directory");
 
+            let timeout = Duration::from_secs(
+                sub_matches
+                    .value_of("timeout")
+                    .unwrap()
+                    .parse::<u64>()
+                    .unwrap(),
+            );
+
             let worker_id = process::id();
 
             println!("WkHTMLtoPDF Cluster :: Worker :: Start [#{}]", worker_id);
-            let mut worker = Worker::new(worker_id, stop_signal.clone(), output_dir);
+            let mut worker = Worker::new(worker_id, stop_signal.clone(), output_dir, timeout);
             worker
                 .run(|| println!("- Worker #{} is ready", worker_id))
                 .expect("failed running worker");

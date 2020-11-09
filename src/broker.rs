@@ -19,6 +19,7 @@ pub struct Broker {
     pub worker_instances: usize,
     pub worker_binpath: PathBuf,
     pub worker_outpath: PathBuf,
+    pub worker_timeout: Duration,
     running_workers: HashMap<u32, WorkerRef>,
 }
 
@@ -28,12 +29,14 @@ impl Broker {
         worker_instances: usize,
         worker_binpath: &Path,
         worker_outpath: &Path,
+        worker_timeout: Duration,
     ) -> Broker {
         let instance = Broker {
             id: id,
             worker_instances: worker_instances,
             worker_binpath: PathBuf::from(worker_binpath),
             worker_outpath: PathBuf::from(worker_outpath),
+            worker_timeout: worker_timeout,
             running_workers: HashMap::new(),
         };
         instance
@@ -63,6 +66,8 @@ impl Broker {
                 .arg("start")
                 .arg("--output")
                 .arg(&self.worker_outpath.to_str().unwrap())
+                .arg("--timeout")
+                .arg(self.worker_timeout.as_secs().to_string())
                 .stdout(Stdio::inherit())
                 .stderr(Stdio::inherit())
                 .spawn()

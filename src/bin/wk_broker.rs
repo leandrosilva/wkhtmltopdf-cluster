@@ -3,6 +3,7 @@ use ctrlc;
 use std::env;
 use std::path::Path;
 use std::process;
+use std::time::Duration;
 use std::sync::{Arc, RwLock};
 use wkhtmltopdf_cluster::broker::Broker;
 
@@ -43,6 +44,15 @@ fn main() {
                         .takes_value(true)
                         .value_name("DIR")
                         .required(false),
+                )
+                .arg(
+                    Arg::with_name("timeout")
+                        .about("max seconds per request")
+                        .short('t')
+                        .long("timeout")
+                        .takes_value(true)
+                        .value_name("TIMEOUT")
+                        .default_value("5"),
                 ),
         );
 
@@ -58,7 +68,14 @@ fn main() {
             let w_output: String = sub_matches
                 .value_of_t("output")
                 .unwrap_or_else(|_err| get_default_output_dir());
-
+            let w_timeout = Duration::from_secs(
+                sub_matches
+                    .value_of("timeout")
+                    .unwrap()
+                    .parse::<u64>()
+                    .unwrap(),
+            );
+    
             let broker_id = process::id();
 
             println!("WkHTMLtoPDF Cluster :: Manager :: Start [#{}]", broker_id);
@@ -67,6 +84,7 @@ fn main() {
                 w_instances,
                 Path::new(&w_binpath),
                 Path::new(&w_output),
+                w_timeout
             )));
             broker
                 .clone()
