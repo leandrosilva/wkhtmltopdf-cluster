@@ -2,6 +2,7 @@ use super::error::{AnyError, Result};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
+use std::sync::{Arc, RwLock};
 use std::time::Duration;
 use std::{thread, time};
 use sysinfo::{ProcessExt, System, SystemExt};
@@ -20,7 +21,7 @@ pub struct Broker {
     pub worker_binpath: PathBuf,
     pub worker_outpath: PathBuf,
     pub worker_timeout: Duration,
-    running_workers: HashMap<u32, WorkerRef>,
+    running_workers: Arc<RwLock<HashMap<u32, WorkerRef>>>,
 }
 
 impl Broker {
@@ -37,7 +38,7 @@ impl Broker {
             worker_binpath: PathBuf::from(worker_binpath),
             worker_outpath: PathBuf::from(worker_outpath),
             worker_timeout: worker_timeout,
-            running_workers: HashMap::new(),
+            running_workers: Arc::new(RwLock::new(HashMap::new())),
         };
         instance
     }
@@ -52,7 +53,13 @@ impl Broker {
         self.start_workers().expect("failed to start workers");
         self.watch_workers().expect("failed watching processess");
         self.start_proxy(|| {
-            let pids = self.running_workers.iter().map(|kv| *kv.0).collect();
+            let pids = self
+                .running_workers
+                .read()
+                .expect("failed to acquire read lock of running workers map")
+                .iter()
+                .map(|kv| *kv.0)
+                .collect();
             // workers are ready, so notify it
             on_ready(pids);
         })
@@ -62,26 +69,56 @@ impl Broker {
 
     fn start_workers(&mut self) -> Result<()> {
         for i in 0..self.worker_instances {
-            let child = Command::new(&self.worker_binpath)
-                .arg("start")
-                .arg("--output")
-                .arg(&self.worker_outpath.to_str().unwrap())
-                .arg("--timeout")
-                .arg(self.worker_timeout.as_secs().to_string())
-                .stdout(Stdio::inherit())
-                .stderr(Stdio::inherit())
-                .spawn()
-                .expect(format!("failed to start #{} {:?}", i, self.worker_binpath).as_str());
-            self.running_workers.insert(
+            let child = Self::start_worker(
+                &self.worker_binpath,
+                &self.worker_outpath,
+                &self.worker_timeout,
+            )
+            .expect(format!("failed to start worker #{} {:?}", i, self.worker_binpath).as_str());
+            Self::add_running_worker(self.running_workers.clone(), child);
+            thread::sleep(time::Duration::from_millis(100));
+        }
+        Ok(())
+    }
+
+    fn start_worker(
+        worker_binpath: &PathBuf,
+        worker_outpath: &PathBuf,
+        worker_timeout: &Duration,
+    ) -> Result<Child> {
+        let result = Command::new(&worker_binpath)
+            .arg("start")
+            .arg("--output")
+            .arg(&worker_outpath.to_str().unwrap())
+            .arg("--timeout")
+            .arg(worker_timeout.as_secs().to_string())
+            .stdout(Stdio::inherit())
+            .stderr(Stdio::inherit())
+            .spawn();
+        match result {
+            Ok(child) => Ok(child),
+            Err(reason) => Err(AnyError::from(reason)),
+        }
+    }
+
+    fn add_running_worker(running_workers: Arc<RwLock<HashMap<u32, WorkerRef>>>, child: Child) {
+        running_workers
+            .write()
+            .expect("failed to acquire write lock of running workers map")
+            .insert(
                 child.id(),
                 WorkerRef {
                     pid: child.id(),
                     os_process: child,
                 },
             );
-            thread::sleep(time::Duration::from_millis(100));
-        }
-        Ok(())
+    }
+
+    fn remove_running_worker(running_workers: Arc<RwLock<HashMap<u32, WorkerRef>>>, pid: u32) {
+        running_workers
+            .write()
+            .expect("failed to acquire write lock of running workers map")
+            .remove(&pid);
     }
 
     fn start_proxy<F: Fn()>(&self, on_ready: F) -> Result<()> {
@@ -123,6 +160,11 @@ impl Broker {
             .into_string()
             .unwrap();
 
+        let worker_binpath = self.worker_binpath.clone();
+        let worker_outpath = self.worker_outpath.clone();
+        let worker_timeout = self.worker_timeout;
+        let running_workers = self.running_workers.clone();
+
         std::thread::spawn(move || loop {
             println!("-->");
             let sys = System::new_all();
@@ -142,6 +184,15 @@ impl Broker {
                     }
                 }
             }
+
+            // whatever proper IF and stuff, THEN add start worker
+            // let child = Self::start_worker(&worker_binpath, &worker_outpath, &worker_timeout)
+            //     .expect("failed to start worker");
+            // Self::add_running_worker(running_workers.clone(), child);
+
+            // whatever proper IF and stuff, THEN remove start worker
+            // Self::remove_running_worker(running_workers.clone(), pid);
+
             println!("<--");
             thread::sleep(Duration::from_secs(5));
         });
@@ -185,7 +236,13 @@ mod tests {
 
     #[test]
     fn create_broker() {
-        let broker = Broker::new(0, 2, Path::new("bin"), Path::new("out"));
+        let broker = Broker::new(
+            0,
+            2,
+            Path::new("bin"),
+            Path::new("out"),
+            Duration::from_secs(5),
+        );
         assert_eq!(broker.worker_instances, 2);
         assert_eq!(broker.worker_binpath.as_os_str(), "bin");
         assert_eq!(broker.worker_outpath.as_os_str(), "out");
