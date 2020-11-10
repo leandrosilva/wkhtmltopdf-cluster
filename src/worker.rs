@@ -35,36 +35,27 @@ impl Worker {
 
     pub fn run<'a, F: 'a + Fn()>(&'a mut self, on_ready: F) -> Result<()> {
         let (heartbeat_tx, heartbeat_rx) = channel::<()>();
-        self.spawn_heartbeat_monitoring(heartbeat_rx);
+        self.watch_eventloop(heartbeat_rx);
         self.run_eventloop(heartbeat_tx, on_ready)
     }
 
-    fn spawn_heartbeat_monitoring(&self, heartbeat_rx: Receiver<()>) {
-        let local_id = self.id;
-        let local_timeout = self.timeout;
-        let local_stop_signal = self.stop_signal.clone();
+    fn watch_eventloop(&self, heartbeat_rx: Receiver<()>) {
+        let id = self.id;
+        let timeout = self.timeout;
+        let stop_signal = self.stop_signal.clone();
 
         thread::spawn(move || {
-            Self::heartbeat_monitoring(local_id, local_stop_signal, heartbeat_rx, local_timeout);
-        });
-    }
-
-    fn heartbeat_monitoring(
-        id: u32,
-        stop_signal: Arc<AtomicBool>,
-        heartbeat_rx: Receiver<()>,
-        timeout: Duration,
-    ) {
-        while !stop_signal.load(Ordering::SeqCst) {
-            if heartbeat_rx.recv_timeout(timeout).is_err() {
-                println!(
-                    "[#{}] Worker is hugging for more than {}s and will be killed now",
-                    id,
-                    timeout.as_secs()
-                );
-                process::exit(666);
+            while !stop_signal.load(Ordering::SeqCst) {
+                if heartbeat_rx.recv_timeout(timeout).is_err() {
+                    println!(
+                        "[#{}] Worker is hugging for more than {}s and will be killed now",
+                        id,
+                        timeout.as_secs()
+                    );
+                    process::exit(666);
+                }
             }
-        }
+        });
     }
 
     fn run_eventloop<'a, F: 'a + Fn()>(
@@ -91,7 +82,7 @@ impl Worker {
                 // send heartbeat to signal it's not hugging
                 if let Err(reason) = heartbeat_tx.send(()) {
                     println!(
-                        "[#{}] Something went weird with heartbeat monitoring: {:?}",
+                        "[#{}] Something went weird with the heartbeat monitoring: {:?}",
                         self.id, reason
                     );
                     break;

@@ -73,7 +73,7 @@ fn main() {
                     .value_of("timeout")
                     .unwrap()
                     .parse::<u64>()
-                    .unwrap(),
+                    .expect("failed to parse timeout argument"),
             );
     
             let broker_id = process::id();
