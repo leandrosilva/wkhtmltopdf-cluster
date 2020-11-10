@@ -2,9 +2,10 @@ use super::error::{AnyError, Result};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, RwLock};
+use std::thread;
 use std::time::Duration;
-use std::{thread, time};
 use sysinfo::{ProcessExt, System, SystemExt};
 use zmq;
 
@@ -17,6 +18,7 @@ struct WorkerRef {
 #[derive(Debug)]
 pub struct Broker {
     pub id: u32,
+    stop_signal: Arc<AtomicBool>,
     pub worker_instances: usize,
     pub worker_binpath: PathBuf,
     pub worker_outpath: PathBuf,
@@ -27,6 +29,7 @@ pub struct Broker {
 impl Broker {
     pub fn new(
         id: u32,
+        stop_signal: Arc<AtomicBool>,
         worker_instances: usize,
         worker_binpath: &Path,
         worker_outpath: &Path,
@@ -34,6 +37,7 @@ impl Broker {
     ) -> Broker {
         let instance = Broker {
             id: id,
+            stop_signal: stop_signal,
             worker_instances: worker_instances,
             worker_binpath: PathBuf::from(worker_binpath),
             worker_outpath: PathBuf::from(worker_outpath),
@@ -76,7 +80,6 @@ impl Broker {
             )
             .expect(format!("failed to start worker #{} {:?}", i, self.worker_binpath).as_str());
             Self::add_running_worker(self.running_workers.clone(), child);
-            thread::sleep(time::Duration::from_millis(100));
         }
         Ok(())
     }
@@ -160,41 +163,68 @@ impl Broker {
             .into_string()
             .unwrap();
 
+        let stop_signal = self.stop_signal.clone();
         let worker_binpath = self.worker_binpath.clone();
         let worker_outpath = self.worker_outpath.clone();
         let worker_timeout = self.worker_timeout;
         let running_workers = self.running_workers.clone();
 
-        std::thread::spawn(move || loop {
-            println!("-->");
-            let sys = System::new_all();
-            for (pid, process) in sys.get_processes() {
-                if process.name().contains(worker_exec.as_str()) {
-                    if let Some(parent) = process.parent() {
-                        if parent == id {
-                            println!(
-                                "[{}:{}] {} {}kB {}%",
-                                parent,
-                                pid,
-                                process.name(),
-                                process.memory(),
-                                process.cpu_usage()
-                            );
+        std::thread::spawn(move || {
+            while !stop_signal.load(Ordering::SeqCst) {
+                println!("--> [watch_workers]");
+                // actual workers running now under this broker
+                let mut current_running_workers = Vec::new();
+                let sys = System::new_all();
+                for (pid, process) in sys.get_processes() {
+                    if process.name().contains(worker_exec.as_str()) {
+                        if let Some(parent) = process.parent() {
+                            if parent == id {
+                                current_running_workers.push(pid);
+                                println!(
+                                    "[{}:{}] {} {}kB {}%",
+                                    parent,
+                                    pid,
+                                    process.name(),
+                                    process.memory(),
+                                    process.cpu_usage()
+                                );
+                            }
                         }
                     }
                 }
+
+                // house keeping
+                if !stop_signal.load(Ordering::SeqCst) {
+                    let pids: Vec<u32> = running_workers
+                        .read()
+                        .expect("failed to acquire lock of running workers")
+                        .iter()
+                        .map(|kv| *kv.0)
+                        .collect();
+                    for pid in pids {
+                        let upid = pid as usize;
+                        if !current_running_workers.contains(&&upid) {
+                            println!("Will remove worker #{} which is dead", pid);
+                            Self::remove_running_worker(running_workers.clone(), pid);
+                            
+                            // another check before start new workers, because it might be
+                            // close here when stop signal was triggered
+                            if !stop_signal.load(Ordering::SeqCst) {
+                                println!("Will start another worker to fill in");
+                                let child = Self::start_worker(
+                                    &worker_binpath,
+                                    &worker_outpath,
+                                    &worker_timeout,
+                                )
+                                .expect("failed to start worker");
+                                Self::add_running_worker(running_workers.clone(), child);
+                            }
+                        }
+                    }
+                }
+                println!("<-- [watch_workers]");
+                thread::sleep(Duration::from_secs(5));
             }
-
-            // whatever proper IF and stuff, THEN add start worker
-            // let child = Self::start_worker(&worker_binpath, &worker_outpath, &worker_timeout)
-            //     .expect("failed to start worker");
-            // Self::add_running_worker(running_workers.clone(), child);
-
-            // whatever proper IF and stuff, THEN remove start worker
-            // Self::remove_running_worker(running_workers.clone(), pid);
-
-            println!("<--");
-            thread::sleep(Duration::from_secs(5));
         });
         Ok(())
     }
@@ -238,6 +268,7 @@ mod tests {
     fn create_broker() {
         let broker = Broker::new(
             0,
+            Arc::new(AtomicBool::new(false)),
             2,
             Path::new("bin"),
             Path::new("out"),

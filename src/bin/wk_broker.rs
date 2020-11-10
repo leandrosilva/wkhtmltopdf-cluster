@@ -5,6 +5,7 @@ use std::path::Path;
 use std::process;
 use std::time::Duration;
 use std::sync::{Arc, RwLock};
+use std::sync::atomic::{AtomicBool, Ordering};
 use wkhtmltopdf_cluster::broker::Broker;
 
 // $ cargo run -p wkhtmltopdf-cluster --bin broker start -i 2
@@ -56,7 +57,8 @@ fn main() {
                 ),
         );
 
-    watch_stop_signal();
+    let stop_signal = Arc::new(AtomicBool::new(false));
+    watch_stop_signal(stop_signal.clone());
 
     let matches = app.get_matches_mut();
     match matches.subcommand() {
@@ -81,6 +83,7 @@ fn main() {
             println!("WkHTMLtoPDF Cluster :: Manager :: Start [#{}]", broker_id);
             let broker = Arc::new(RwLock::new(Broker::new(
                 broker_id,
+                stop_signal.clone(),
                 w_instances,
                 Path::new(&w_binpath),
                 Path::new(&w_output),
@@ -106,13 +109,12 @@ fn main() {
     }
 }
 
-fn watch_stop_signal() {
-    let mut stop_signal = false;
+fn watch_stop_signal(stop_signal: Arc<AtomicBool>) {
     ctrlc::set_handler(move || {
-        if !stop_signal {
+        if !stop_signal.load(Ordering::SeqCst) {
             println!("[Ctrl+C]\nShutting down...");
+            stop_signal.store(true, Ordering::SeqCst);
             Broker::send_stop_signal(5).expect("failed to send stop signal to broker");
-            stop_signal = true;
             return;
         }
         println!("Bye, bye!");

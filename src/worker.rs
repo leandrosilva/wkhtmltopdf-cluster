@@ -173,10 +173,9 @@ mod tests {
 
     #[test]
     fn create_worker() {
-        let stop_signal = Arc::new(AtomicBool::new(false));
         let worker = Worker::new(
             123,
-            stop_signal.clone(),
+            Arc::new(AtomicBool::new(false)),
             Path::new("out"),
             Duration::from_secs(3),
         );
