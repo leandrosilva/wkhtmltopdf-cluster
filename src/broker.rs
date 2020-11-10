@@ -104,7 +104,7 @@ impl Broker {
     fn add_running_worker(running_workers: Arc<RwLock<HashMap<u32, WorkerRef>>>, child: Child) {
         running_workers
             .write()
-            .expect("failed to acquire write lock of running workers map")
+            .expect("failed to acquire write lock to add running worker")
             .insert(
                 child.id(),
                 WorkerRef {
@@ -117,7 +117,7 @@ impl Broker {
     fn remove_running_worker(running_workers: Arc<RwLock<HashMap<u32, WorkerRef>>>, pid: u32) {
         running_workers
             .write()
-            .expect("failed to acquire write lock of running workers map")
+            .expect("failed to acquire write lock to remove dead worker")
             .remove(&pid);
     }
 
