@@ -48,7 +48,7 @@ impl Worker {
             while !stop_signal.load(Ordering::SeqCst) {
                 if heartbeat_rx.recv_timeout(timeout).is_err() {
                     println!(
-                        "[#{}] Worker is hugging for more than {}s and will be killed now",
+                        "[#{}] Hugging for more than {}s and will terminate now",
                         id,
                         timeout.as_secs()
                     );

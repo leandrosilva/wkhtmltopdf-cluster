@@ -171,6 +171,10 @@ impl Broker {
 
         std::thread::spawn(move || {
             while !stop_signal.load(Ordering::SeqCst) {
+                // it's better to wait at start then at end, because at the end
+                // the sleeping might interfere on the shutting down process
+                thread::sleep(Duration::from_secs(5));
+
                 println!("--> [watch_workers]");
                 // actual workers running now under this broker
                 let mut current_running_workers = Vec::new();
@@ -206,7 +210,7 @@ impl Broker {
                         if !current_running_workers.contains(&&upid) {
                             println!("Will remove worker #{} which is dead", pid);
                             Self::remove_running_worker(running_workers.clone(), pid);
-                            
+
                             // another check before start new workers, because it might be
                             // close here when stop signal was triggered
                             if !stop_signal.load(Ordering::SeqCst) {
@@ -223,7 +227,6 @@ impl Broker {
                     }
                 }
                 println!("<-- [watch_workers]");
-                thread::sleep(Duration::from_secs(5));
             }
         });
         Ok(())
