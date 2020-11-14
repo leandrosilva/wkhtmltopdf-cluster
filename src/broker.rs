@@ -6,7 +6,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, RwLock};
 use std::thread;
 use std::time::Duration;
-use sysinfo::{ProcessExt, System, SystemExt};
+use sysinfo::{Process, ProcessExt, Signal, System, SystemExt};
 use zmq;
 
 #[derive(Debug)]
@@ -79,7 +79,7 @@ impl Broker {
                 &self.worker_timeout,
             )
             .expect(format!("failed to start worker #{} {:?}", i, self.worker_binpath).as_str());
-            Self::add_running_worker(self.running_workers.clone(), child);
+            Self::register_worker(self.running_workers.clone(), child);
         }
         Ok(())
     }
@@ -104,7 +104,7 @@ impl Broker {
         }
     }
 
-    fn add_running_worker(running_workers: Arc<RwLock<HashMap<u32, WorkerRef>>>, child: Child) {
+    fn register_worker(running_workers: Arc<RwLock<HashMap<u32, WorkerRef>>>, child: Child) {
         running_workers
             .write()
             .expect("failed to acquire write lock to add running worker")
@@ -117,7 +117,7 @@ impl Broker {
             );
     }
 
-    fn remove_running_worker(running_workers: Arc<RwLock<HashMap<u32, WorkerRef>>>, pid: u32) {
+    fn remove_worker(running_workers: Arc<RwLock<HashMap<u32, WorkerRef>>>, pid: &u32) {
         running_workers
             .write()
             .expect("failed to acquire write lock to remove dead worker")
@@ -154,15 +154,7 @@ impl Broker {
     }
 
     fn watch_workers(&self) -> Result<()> {
-        let id = self.id as usize;
-        let worker_exec = self
-            .worker_binpath
-            .file_name()
-            .unwrap()
-            .to_owned()
-            .into_string()
-            .unwrap();
-
+        let id = self.id;
         let stop_signal = self.stop_signal.clone();
         let worker_binpath = self.worker_binpath.clone();
         let worker_outpath = self.worker_outpath.clone();
@@ -173,29 +165,21 @@ impl Broker {
             while !stop_signal.load(Ordering::SeqCst) {
                 // it's better to wait at start then at end, because at the end
                 // the sleeping might interfere on the shutting down process
-                thread::sleep(Duration::from_secs(5));
+                thread::sleep(Duration::from_secs(5)); // TODO: parametize it
 
                 println!("--> [watch_workers]");
                 // actual workers running now under this broker
-                let mut current_running_workers = Vec::new();
-                let sys = System::new_all();
-                for (pid, process) in sys.get_processes() {
-                    if process.name().contains(worker_exec.as_str()) {
-                        if let Some(parent) = process.parent() {
-                            if parent == id {
-                                current_running_workers.push(pid);
-                                println!(
-                                    "[{}:{}] {} {}kB {}%",
-                                    parent,
-                                    pid,
-                                    process.name(),
-                                    process.memory(),
-                                    process.cpu_usage()
-                                );
-                            }
-                        }
-                    }
-                }
+                let current_running_workers =
+                    Self::get_current_running_workers(&id, |parent_id, pid, process| {
+                        println!(
+                            "[{}:{}] {} {}kB {}%",
+                            parent_id,
+                            pid,
+                            process.name(),
+                            process.memory(),
+                            process.cpu_usage()
+                        );
+                    });
 
                 // house keeping
                 if !stop_signal.load(Ordering::SeqCst) {
@@ -206,10 +190,9 @@ impl Broker {
                         .map(|kv| *kv.0)
                         .collect();
                     for pid in pids {
-                        let upid = pid as usize;
-                        if !current_running_workers.contains(&&upid) {
+                        if !current_running_workers.contains(&pid) {
                             println!("Will remove worker #{} which is dead", pid);
-                            Self::remove_running_worker(running_workers.clone(), pid);
+                            Self::remove_worker(running_workers.clone(), &pid);
 
                             // another check before start new workers, because it might be
                             // close here when stop signal was triggered
@@ -221,7 +204,7 @@ impl Broker {
                                     &worker_timeout,
                                 )
                                 .expect("failed to start worker");
-                                Self::add_running_worker(running_workers.clone(), child);
+                                Self::register_worker(running_workers.clone(), child);
                             }
                         }
                     }
@@ -232,12 +215,34 @@ impl Broker {
         Ok(())
     }
 
-    pub fn send_stop_signal(graceful_time: u64) -> Result<()> {
+    fn get_current_running_workers<F: Fn(u32, u32, &Process)>(id: &u32, callback: F) -> Vec<u32> {
+        let mut worker_processes: Vec<u32> = Vec::new();
+        let sys = System::new_all();
+        for (pid, process) in sys.get_processes() {
+            if let Some(parent_id) = process.parent() {
+                if parent_id == *id as usize {
+                    worker_processes.push(*pid as u32);
+                    callback(parent_id as u32, *pid as u32, process);
+                }
+            }
+        }
+        worker_processes
+    }
+
+    pub fn send_stop_signal(id: &u32, graceful_time: u64) -> Result<()> {
         println!("Will give workers time to gracefully shutdown");
         thread::sleep(Duration::from_secs(graceful_time));
 
         println!("Will terminate socket now");
-        Self::send_stop_signal_to_control_socket()
+        Self::send_stop_signal_to_control_socket().expect("failed to terminate socket");
+
+        println!("Will ensure all workers terminate one way or another");
+        Self::get_current_running_workers(&id, |_, pid, process| {
+            println!("Worker #{} still running and will be terminated", pid);
+            process.kill(Signal::Kill);
+        });
+
+        Ok(())
     }
 
     fn send_stop_signal_to_control_socket() -> Result<()> {
