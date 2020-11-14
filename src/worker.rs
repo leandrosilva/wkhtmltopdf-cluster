@@ -1,4 +1,5 @@
 use super::error::Result;
+use super::helpers::{zmq_assert_empty, zmq_recv_string, zmq_send, zmq_send_multipart};
 use std::path::{Path, PathBuf};
 use std::process;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -63,13 +64,15 @@ impl Worker {
         heartbeat_tx: Sender<()>,
         on_ready: F,
     ) -> Result<()> {
-        let ctx = zmq::Context::new();
-        let service_socket = ctx.socket(zmq::REP).unwrap();
+        let socket_id = format!("W{}", self.id);
+        let context = zmq::Context::new();
+        let service_socket = context.socket(zmq::REQ).unwrap();
+        service_socket.set_identity(socket_id.as_bytes())?;
+        service_socket.set_sndtimeo(1000)?;
+        service_socket.set_rcvtimeo(1000)?;
         service_socket
             .connect("tcp://127.0.0.1:6661")
             .expect("failed listening on port 6661");
-        service_socket.set_rcvtimeo(1000)?;
-        service_socket.set_sndtimeo(1000)?;
 
         // Enclosing scope for PdfApplication
         {
@@ -77,6 +80,7 @@ impl Worker {
 
             // worker is ready, so notify it
             on_ready();
+            zmq_send(&service_socket, "READY", "failed sending <READY> to broker");
 
             while !self.stop_signal.load(Ordering::SeqCst) {
                 // send heartbeat to signal it's not hugging
@@ -95,22 +99,49 @@ impl Worker {
                 };
                 println!("[#{}] Message: {}", self.id, message);
 
-                if message.to_uppercase() == "STOP" {
-                    service_socket
-                        .send(format!("[#{}] Shutting down", self.id).as_str(), 0)
-                        .expect("failed to send STOP response");
+                // -- from broker
+                if message == "STOP" {
+                    zmq_send(&service_socket, "GONE", "failed to send <GONE> response");
                     break;
                 }
 
+                // -- from client
+                let client_id = message;
+                zmq_assert_empty(
+                    &service_socket,
+                    "failed reading 1nd <EMPTY> of client's envelope",
+                );
+                let request = zmq_recv_string(
+                    &service_socket,
+                    "failed reading <REQUEST> from client's envelope",
+                );
+                println!("[#{}] Client #{} request: {}", self.id, client_id, request);
+
+                let payload = request; // TODO: to be JSON
+                println!("[#{}] Client #{} payload: {}", self.id, client_id, payload);
+
                 let message_id = get_uid();
-                let url = match message.parse() {
+                let url = match payload.parse() {
                     Ok(parsed) => parsed,
                     Err(_) => {
-                        let err_msg = format!("[#{}] Cannot parse URL: {}", self.id, message);
+                        let err_msg = format!("Cannot parse URL: {}", payload);
                         println!("{}", err_msg.as_str());
-                        service_socket
-                            .send(format!("{}", err_msg.as_str()).as_str(), 0)
-                            .expect("failed sending message");
+
+                        // build reply multipart envelope to client as:
+                        // <CLIENT>, <EMPTY>, <REPLY>, <EMPTY>, <CONTENT>
+                        let reply_envelope = vec![
+                            client_id.as_bytes().to_vec(),
+                            b"".to_vec(),
+                            b"ERROR".to_vec(),
+                            b"".to_vec(),
+                            err_msg.as_bytes().to_vec(),
+                        ];
+
+                        zmq_send_multipart(
+                            &service_socket,
+                            reply_envelope,
+                            format!("failed sending reply to client #{}", client_id).as_str(),
+                        );
                         continue;
                     }
                 };
@@ -135,12 +166,24 @@ impl Worker {
                     self.id,
                     filepath.to_str().unwrap()
                 );
-                service_socket
-                    .send(
-                        format!("[#{}] PDF saved at output directory", self.id).as_str(),
-                        0,
-                    )
-                    .expect("failed sending message");
+
+                let content = format!("PDF saved at output directory");
+
+                // build reply multipart envelope to client as:
+                // <CLIENT>, <EMPTY>, <REPLY>, <EMPTY>, <CONTENT>
+                let reply_envelope = vec![
+                    client_id.as_bytes().to_vec(),
+                    b"".to_vec(),
+                    b"REPLY".to_vec(),
+                    b"".to_vec(),
+                    content.as_bytes().to_vec(),
+                ];
+
+                zmq_send_multipart(
+                    &service_socket,
+                    reply_envelope,
+                    format!("failed sending reply to client #{}", client_id).as_str(),
+                );
             }
         }
 
@@ -148,7 +191,7 @@ impl Worker {
         service_socket
             .disconnect("tcp://127.0.0.1:6661")
             .expect("failed disconnecting on port 6661");
-        println!("[#{}] Disconnected from broker", self.id);
+        println!("[#{}] Disconnected from broker to stop", self.id);
 
         Ok(())
     }

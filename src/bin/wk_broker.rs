@@ -113,11 +113,7 @@ fn watch_stop_signal(stop_signal: Arc<AtomicBool>) {
     ctrlc::set_handler(move || {
         if !stop_signal.load(Ordering::SeqCst) {
             println!("[Ctrl+C]\nShutting down...");
-            stop_signal.store(true, Ordering::SeqCst);
-
-            let broker_id = process::id();
-            Broker::send_stop_signal(&broker_id, 5).expect("failed to send stop signal to broker");
-            
+            stop_signal.store(true, Ordering::SeqCst);           
             return;
         }
         println!("Bye, bye!");

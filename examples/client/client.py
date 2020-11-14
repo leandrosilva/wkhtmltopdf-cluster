@@ -1,8 +1,14 @@
 import sys
 import zmq
+import os
 
-ctx = zmq.Context()
-req = ctx.socket(zmq.REQ)
+id = f'C{os.getpid()}'
+print('ID:', id)
+
+context = zmq.Context()
+req = context.socket(zmq.REQ)
+req.identity = id.encode('ascii')
+req.setsockopt(zmq.SNDTIMEO, 10000)
 req.setsockopt(zmq.RCVTIMEO, 10000)
 req.connect('tcp://127.0.0.1:6660')
 
@@ -19,7 +25,7 @@ for i in range(1, 11):
         req.send_string(msg)
         print('REQ:', msg)
 
-        resp = req.recv_string()
+        resp = req.recv_multipart()
         print('RESP:', resp)
     except Exception as e:
         print(e)
