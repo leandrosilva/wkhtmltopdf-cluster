@@ -157,6 +157,7 @@ impl Broker {
             // should only poll frontend if there is backend ready to work
             let target_sockets = if available_workers.is_empty() { 1 } else { 2 };
 
+            // poll only current active sockets
             let poll_result = zmq::poll(&mut service_sockets[0..target_sockets], 1000)
                 .expect("failed to poll sockets");
             if poll_result == -1 {
@@ -393,19 +394,22 @@ impl Broker {
     }
 
     fn stop(&self) -> Result<()> {
-        self.terminate_workers(5); // TODO: parametize it
+        self.terminate_workers();
         println!("Everything ready to stop");
         Ok(())
     }
 
-    fn terminate_workers(&self, graceful_time: u64) {
+    fn terminate_workers(&self) {
         println!("Will give workers time to gracefully shutdown");
-        thread::sleep(Duration::from_secs(graceful_time));
+        thread::sleep(Duration::from_secs(5)); // TODO: parametize it
 
         println!("Will ensure all workers terminate one way or another");
         Self::get_current_running_workers(&self.id, |_, pid, process| {
             println!("Worker #{} still running and will be terminated", pid);
-            process.kill(Signal::Kill);
+            let killed = process.kill(Signal::Kill);
+            if killed {
+                println!("Worker #{} was terminated", pid);
+            }
         });
     }
 }
