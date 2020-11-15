@@ -128,7 +128,7 @@ impl Worker {
                         println!("{}", err_msg.as_str());
 
                         // build reply multipart envelope to client as:
-                        // <CLIENT>, <EMPTY>, <REPLY>, <EMPTY>, <CONTENT>
+                        // CLIENT, EMPTY, REPLY, EMPTY, CONTENT
                         let reply_envelope = vec![
                             client_id.as_bytes().to_vec(),
                             b"".to_vec(),
@@ -170,7 +170,7 @@ impl Worker {
                 let content = format!("PDF saved at output directory");
 
                 // build reply multipart envelope to client as:
-                // <CLIENT>, <EMPTY>, <REPLY>, <EMPTY>, <CONTENT>
+                // CLIENT, EMPTY, REPLY, EMPTY, CONTENT
                 let reply_envelope = vec![
                     client_id.as_bytes().to_vec(),
                     b"".to_vec(),

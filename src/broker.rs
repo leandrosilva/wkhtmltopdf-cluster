@@ -170,10 +170,10 @@ impl Broker {
             if available_sockets[0].is_readable() {
                 println!("<<backend>>");
                 // worker envelope:
-                //   <ID>, <EMPTY>, <READY>
-                //   <ID>, <EMPTY>, <GONE>
-                //   <ID>, <EMPTY>, <CLIENT>, <EMPTY>, <REPLY>
-                //   <ID>, <EMPTY>, <CLIENT>, <EMPTY>, <REPLY>, <EMPTY>, <CONTENT>
+                //   ID>, EMPTY, READY
+                //   ID>, EMPTY, GONE
+                //   ID>, EMPTY, CLIENT, EMPTY, REPLY
+                //   ID>, EMPTY, CLIENT, EMPTY, REPLY, EMPTY, CONTENT
 
                 let worker_id = zmq_recv_string(&backend, "failed reading ID of worker's envelope");
                 available_workers.push_front(worker_id.clone());
@@ -209,7 +209,7 @@ impl Broker {
                         );
 
                         // multipart envelope from worker to client:
-                        //   <CLIENT>, <EMPTY>, <WORKER>, <EMPTY>, <REPLY>, <EMPTY>, <CONTENT>
+                        //   CLIENT, EMPTY, WORKER, EMPTY, REPLY, EMPTY, CONTENT
                         let reply_envelope = vec![
                             client_id.as_bytes().to_vec(),
                             b"".to_vec(),
@@ -237,7 +237,7 @@ impl Broker {
             // -- frontend
             if available_sockets[1].is_readable() {
                 // client envelope:
-                //   <ID>, <EMPTY>, <REQUEST>
+                //   ID, EMPTY, REQUEST
 
                 let client_id =
                     zmq_recv_string(&frontend, "failed reading <ID> from client's envelope");
@@ -251,7 +251,7 @@ impl Broker {
                     .expect("failed to get an available worker");
 
                 // multipart envelope from client to worker:
-                //   <WORKER>, <EMPTY>, <CLIENT>, <EMPTY>, <REQUEST>
+                //   WORKER, EMPTY, CLIENT, EMPTY, REQUEST
                 let reply_envelope = vec![
                     worker_id.as_bytes().to_vec(),
                     "".as_bytes().to_vec(),
