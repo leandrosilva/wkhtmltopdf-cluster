@@ -1,6 +1,7 @@
 use super::error::{AnyError, Result};
 use super::helpers::{zmq_assert_empty, zmq_recv_string, zmq_send_multipart};
 use std::collections::HashMap;
+use std::collections::VecDeque;
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -9,7 +10,6 @@ use std::thread;
 use std::time::Duration;
 use sysinfo::{Process, ProcessExt, Signal, System, SystemExt};
 use zmq;
-use std::collections::VecDeque;
 
 #[derive(Debug)]
 struct WorkerRef {
@@ -129,21 +129,19 @@ impl Broker {
     fn run_eventloop<F: Fn()>(&self, on_ready: F) -> Result<()> {
         let context = zmq::Context::new();
 
-        // BEFORE: client REQ talks to this ROUTER
-        // NOW:    same thing
-        let frontend = context.socket(zmq::ROUTER).unwrap();
-        frontend
+        let frontend_socket = context.socket(zmq::ROUTER).unwrap();
+        frontend_socket
             .bind("tcp://127.0.0.1:6660")
             .expect("failed binding frontend socket");
 
-        // BEFORE: this DEALER talks to worker REP talks
-        // NOW:    worker REQ taltks to this ROUTER
-        let backend = context.socket(zmq::ROUTER).unwrap();
-        backend
+        let backend_socket = context.socket(zmq::ROUTER).unwrap();
+        backend_socket
             .bind("tcp://127.0.0.1:6661")
             .expect("failed binding backend socket");
 
-        println!("Listening on:\n- Frontend: tcp://127.0.0.1:6660\n- Backend: tcp://127.0.0.1:6661");
+        println!(
+            "Listening on:\n- Frontend: tcp://127.0.0.1:6660\n- Backend: tcp://127.0.0.1:6661"
+        );
 
         // ready to start proxying, so notify it
         on_ready();
@@ -151,15 +149,15 @@ impl Broker {
         let mut available_workers = VecDeque::new();
 
         while !self.stop_signal.load(Ordering::SeqCst) {
-            let mut available_sockets = [
-                backend.as_poll_item(zmq::POLLIN),
-                frontend.as_poll_item(zmq::POLLIN),
+            let mut service_sockets = [
+                backend_socket.as_poll_item(zmq::POLLIN),
+                frontend_socket.as_poll_item(zmq::POLLIN),
             ];
 
             // should only poll frontend if there is backend ready to work
             let target_sockets = if available_workers.is_empty() { 1 } else { 2 };
 
-            let poll_result = zmq::poll(&mut available_sockets[0..target_sockets], 1000)
+            let poll_result = zmq::poll(&mut service_sockets[0..target_sockets], 1000)
                 .expect("failed to poll sockets");
             if poll_result == -1 {
                 println!("Will STOP due to error polling sockets");
@@ -167,115 +165,154 @@ impl Broker {
             }
 
             // -- backend
-            if available_sockets[0].is_readable() {
-                println!("<<backend>>");
-                // worker envelope:
-                //   ID>, EMPTY, READY
-                //   ID>, EMPTY, GONE
-                //   ID>, EMPTY, CLIENT, EMPTY, REPLY
-                //   ID>, EMPTY, CLIENT, EMPTY, REPLY, EMPTY, CONTENT
-
-                let worker_id = zmq_recv_string(&backend, "failed reading ID of worker's envelope");
-                available_workers.push_front(worker_id.clone());
-
-                zmq_assert_empty(&backend, "failed reading 1st <EMPTY> of worker's envelope");
-
-                let worker_message =
-                    zmq_recv_string(&backend, "failed reading <MESSAGE> of worker's envelope");
-
-                match worker_message.as_str() {
-                    "READY" => println!("Worker #{} is ready", worker_id),
-                    "GONE" => println!("Worker #{} is gone", worker_id),
-                    client_id => {
-                        zmq_assert_empty(
-                            &backend,
-                            "failed reading 2nd <EMPTY> of worker's envelope",
-                        );
-                        let reply = zmq_recv_string(
-                            &backend,
-                            "failed reading <REPLY> of worker's envelope",
-                        );
-                        zmq_assert_empty(
-                            &backend,
-                            "failed reading 3nd <EMPTY> of worker's envelope",
-                        );
-                        let content = zmq_recv_string(
-                            &backend,
-                            "failed reading <CONTENT> of worker's envelope",
-                        );
-                        println!(
-                            "Worker #{} send reply {} to client #{}: {}",
-                            worker_id, reply, client_id, content
-                        );
-
-                        // multipart envelope from worker to client:
-                        //   CLIENT, EMPTY, WORKER, EMPTY, REPLY, EMPTY, CONTENT
-                        let reply_envelope = vec![
-                            client_id.as_bytes().to_vec(),
-                            b"".to_vec(),
-                            worker_id.as_bytes().to_vec(),
-                            b"".to_vec(),
-                            reply.as_bytes().to_vec(),
-                            b"".to_vec(),
-                            content.as_bytes().to_vec(),
-                        ];
-
-                        // forward envelope to given client
-                        zmq_send_multipart(
-                            &frontend,
-                            reply_envelope,
-                            format!(
-                                "failed forwarding reply from worker #{} to client #{}",
-                                worker_id, client_id
-                            )
-                            .as_str(),
-                        );
-                    }
-                }
+            if service_sockets[0].is_readable() {
+                self.handle_backend_talking(
+                    &backend_socket,
+                    &frontend_socket,
+                    &mut available_workers,
+                )
+                .expect("failed handling backend worker");
             }
 
             // -- frontend
-            if available_sockets[1].is_readable() {
-                // client envelope:
-                //   ID, EMPTY, REQUEST
+            if service_sockets[1].is_readable() {
+                self.handle_frontend_talking(
+                    &backend_socket,
+                    &frontend_socket,
+                    &mut available_workers,
+                )
+                .expect("failed handling frontend client");
+            }
+        }
 
-                let client_id =
-                    zmq_recv_string(&frontend, "failed reading <ID> from client's envelope");
-                zmq_assert_empty(&frontend, "failed reading 1nd <EMPTY> of client's envelope");
-                let request =
-                    zmq_recv_string(&frontend, "failed reading <REQUEST> from client's envelope");
+        println!("Will stop listening on sockets");
+        Ok(())
+    }
 
-                println!("Current available workers: {:?}", available_workers);
-                let worker_id = available_workers
-                    .pop_back()
-                    .expect("failed to get an available worker");
+    fn handle_backend_talking(
+        &self,
+        backend_socket: &zmq::Socket,
+        frontend_socket: &zmq::Socket,
+        available_workers: &mut VecDeque<String>,
+    ) -> Result<()> {
+        // worker envelope:
+        //   ID>, EMPTY, READY
+        //   ID>, EMPTY, GONE
+        //   ID>, EMPTY, CLIENT, EMPTY, REPLY
+        //   ID>, EMPTY, CLIENT, EMPTY, REPLY, EMPTY, CONTENT
 
-                // multipart envelope from client to worker:
-                //   WORKER, EMPTY, CLIENT, EMPTY, REQUEST
+        let worker_id = zmq_recv_string(&backend_socket, "failed reading ID of worker's envelope");
+        available_workers.push_front(worker_id.clone());
+
+        zmq_assert_empty(
+            &backend_socket,
+            "failed reading 1st <EMPTY> of worker's envelope",
+        );
+
+        let worker_message = zmq_recv_string(
+            &backend_socket,
+            "failed reading <MESSAGE> of worker's envelope",
+        );
+
+        match worker_message.as_str() {
+            "READY" => println!("Worker #{} is ready", worker_id),
+            "GONE" => println!("Worker #{} is gone", worker_id),
+            client_id => {
+                zmq_assert_empty(
+                    &backend_socket,
+                    "failed reading 2nd <EMPTY> of worker's envelope",
+                );
+                let reply = zmq_recv_string(
+                    &backend_socket,
+                    "failed reading <REPLY> of worker's envelope",
+                );
+                zmq_assert_empty(
+                    &backend_socket,
+                    "failed reading 3nd <EMPTY> of worker's envelope",
+                );
+                let content = zmq_recv_string(
+                    &backend_socket,
+                    "failed reading <CONTENT> of worker's envelope",
+                );
+                println!(
+                    "Worker #{} send reply {} to client #{}: {}",
+                    worker_id, reply, client_id, content
+                );
+
+                // multipart envelope from worker to client:
+                //   CLIENT, EMPTY, WORKER, EMPTY, REPLY, EMPTY, CONTENT
                 let reply_envelope = vec![
-                    worker_id.as_bytes().to_vec(),
-                    "".as_bytes().to_vec(),
                     client_id.as_bytes().to_vec(),
-                    "".as_bytes().to_vec(),
-                    request.as_bytes().to_vec(),
+                    b"".to_vec(),
+                    worker_id.as_bytes().to_vec(),
+                    b"".to_vec(),
+                    reply.as_bytes().to_vec(),
+                    b"".to_vec(),
+                    content.as_bytes().to_vec(),
                 ];
 
-                // forward envelope to given worker
+                // forward reply envelope to given client
                 zmq_send_multipart(
-                    &backend,
+                    &frontend_socket,
                     reply_envelope,
                     format!(
-                        "failed forwarding request from client #{} to worker #{}",
-                        client_id, worker_id
+                        "failed forwarding reply from worker #{} to client #{}",
+                        worker_id, client_id
                     )
                     .as_str(),
                 );
             }
         }
+        Ok(())
+    }
 
-        // TODO: send <STOP> to workers before go?
-        println!("Will stop listening on sockets");
+    fn handle_frontend_talking(
+        &self,
+        backend_socket: &zmq::Socket,
+        frontend_socket: &zmq::Socket,
+        available_workers: &mut VecDeque<String>,
+    ) -> Result<()> {
+        // client envelope:
+        //   ID, EMPTY, REQUEST
 
+        let client_id = zmq_recv_string(
+            &frontend_socket,
+            "failed reading <ID> from client's envelope",
+        );
+        zmq_assert_empty(
+            &frontend_socket,
+            "failed reading 1nd <EMPTY> of client's envelope",
+        );
+        let request = zmq_recv_string(
+            &frontend_socket,
+            "failed reading <REQUEST> from client's envelope",
+        );
+
+        println!("Current available workers: {:?}", available_workers);
+        let worker_id = available_workers
+            .pop_back()
+            .expect("failed to get an available worker");
+
+        // multipart envelope from client to worker:
+        //   WORKER, EMPTY, CLIENT, EMPTY, REQUEST
+        let reply_envelope = vec![
+            worker_id.as_bytes().to_vec(),
+            "".as_bytes().to_vec(),
+            client_id.as_bytes().to_vec(),
+            "".as_bytes().to_vec(),
+            request.as_bytes().to_vec(),
+        ];
+
+        // forward request envelope to given worker
+        zmq_send_multipart(
+            &backend_socket,
+            reply_envelope,
+            format!(
+                "failed forwarding request from client #{} to worker #{}",
+                client_id, worker_id
+            )
+            .as_str(),
+        );
         Ok(())
     }
 
