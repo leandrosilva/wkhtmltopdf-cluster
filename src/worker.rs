@@ -129,7 +129,7 @@ impl Worker {
         service_socket: &zmq::Socket,
         message: String,
     ) -> (String, String) {
-        // multipart envelope of broker's message:
+        // read multipart envelope from client as:
         //   CLIENT, EMPTY, REQUEST
         let client_id = message;
         zmq_assert_empty(
@@ -159,14 +159,14 @@ impl Worker {
             let err_msg = format!("Payload cannot be null");
             println!("{}", err_msg.as_str());
 
-            self.send_reply_with_error(&service_socket, &client_id, &err_msg);
+            self.send_client_reply_with_error(&service_socket, &client_id, &err_msg);
             return;
         }
 
         // parse the actual request
         let message_id = get_uid();
         let url = match payload["url"].as_str() {
-            Some(u) => match u.parse() {
+            Some(s) => match s.parse() {
                 Ok(parsed) => parsed,
                 Err(_) => {
                     let err_msg = format!("Cannot parse URL: {}", payload);
@@ -177,7 +177,7 @@ impl Worker {
                         err_msg.as_str()
                     );
 
-                    self.send_reply_with_error(&service_socket, &client_id, &err_msg);
+                    self.send_client_reply_with_error(&service_socket, &client_id, &err_msg);
                     return;
                 }
             },
@@ -190,7 +190,7 @@ impl Worker {
                     err_msg.as_str()
                 );
 
-                self.send_reply_with_error(&service_socket, &client_id, &err_msg);
+                self.send_client_reply_with_error(&service_socket, &client_id, &err_msg);
                 return;
             }
         };
@@ -236,28 +236,28 @@ impl Worker {
         // TODO: reply with pdf binary content instead of this dummy message
         let content = format!("PDF saved at output directory");
 
-        self.send_reply_with_success(&service_socket, &client_id, &content);
+        self.send_client_reply_with_success(&service_socket, &client_id, &content);
     }
 
-    fn send_reply_with_success(
+    fn send_client_reply_with_success(
         &self,
         service_socket: &zmq::Socket,
         client_id: &String,
         content: &String,
     ) {
-        self.send_reply(&service_socket, &client_id, "REPLY", &content);
+        self.send_client_reply(&service_socket, &client_id, "REPLY", &content);
     }
 
-    fn send_reply_with_error(
+    fn send_client_reply_with_error(
         &self,
         service_socket: &zmq::Socket,
         client_id: &String,
         err_msg: &String,
     ) {
-        self.send_reply(&service_socket, &client_id, "ERROR", &err_msg);
+        self.send_client_reply(&service_socket, &client_id, "ERROR", &err_msg);
     }
 
-    fn send_reply(
+    fn send_client_reply(
         &self,
         service_socket: &zmq::Socket,
         client_id: &String,
@@ -265,7 +265,7 @@ impl Worker {
         reply_content: &String,
     ) {
         // build reply multipart envelope to client as:
-        // CLIENT, EMPTY, REPLY|ERROR, EMPTY, CONTENT
+        //   CLIENT, EMPTY, REPLY|ERROR, EMPTY, CONTENT
         let reply_envelope = vec![
             client_id.as_bytes().to_vec(),
             b"".to_vec(),

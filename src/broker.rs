@@ -197,10 +197,10 @@ impl Broker {
         available_workers: &mut VecDeque<String>,
     ) -> Result<()> {
         // worker envelope:
-        //   ID>, EMPTY, READY
-        //   ID>, EMPTY, GONE
-        //   ID>, EMPTY, CLIENT, EMPTY, REPLY
-        //   ID>, EMPTY, CLIENT, EMPTY, REPLY, EMPTY, CONTENT
+        //   ID, EMPTY, READY
+        //   ID, EMPTY, GONE
+        //   ID, EMPTY, CLIENT, EMPTY, REPLY
+        //   ID, EMPTY, CLIENT, EMPTY, REPLY, EMPTY, CONTENT
 
         let worker_id = zmq_recv_string(&backend_socket, "failed reading ID of worker's envelope");
         available_workers.push_front(worker_id.clone());
