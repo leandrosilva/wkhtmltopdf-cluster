@@ -1,12 +1,13 @@
 use super::error::Result;
-use super::helpers::{zmq_assert_empty, zmq_recv_string, zmq_send, zmq_send_multipart};
+use super::helpers::{get_uid, zmq_assert_empty, zmq_recv_string, zmq_send, zmq_send_multipart};
+use serde_json::Value;
 use std::path::{Path, PathBuf};
 use std::process;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{channel, Receiver, Sender};
 use std::sync::Arc;
 use std::thread;
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::time::Duration;
 use wkhtmltopdf::{Orientation, PdfApplication, Size};
 use zmq;
 
@@ -83,7 +84,7 @@ impl Worker {
             zmq_send(&service_socket, "READY", "failed sending <READY> to broker");
 
             while !self.stop_signal.load(Ordering::SeqCst) {
-                // send heartbeat to signal it's not hugging
+                // send heartbeat to sign it's not hugging
                 if let Err(reason) = heartbeat_tx.send(()) {
                     println!(
                         "[#{}] Something went weird with the heartbeat monitoring: {:?}",
@@ -92,7 +93,8 @@ impl Worker {
                     break;
                 }
 
-                // try to grap some work to do...
+                // try to grap some reply message from broker, which might be a command or a
+                // client ID followed by an actual request
                 let message = match service_socket.recv_string(0) {
                     Ok(received) => received.unwrap(),
                     Err(_) => continue,
@@ -106,84 +108,10 @@ impl Worker {
                 }
 
                 // -- from client
-                let client_id = message;
-                zmq_assert_empty(
-                    &service_socket,
-                    "failed reading 1nd <EMPTY> of client's envelope",
-                );
-                let request = zmq_recv_string(
-                    &service_socket,
-                    "failed reading <REQUEST> from client's envelope",
-                );
+                let (client_id, request) = self.read_client_request(&service_socket, message);
                 println!("[#{}] Client #{} request: {}", self.id, client_id, request);
 
-                let payload = request; // TODO: to be JSON
-                println!("[#{}] Client #{} payload: {}", self.id, client_id, payload);
-
-                let message_id = get_uid();
-                let url = match payload.parse() {
-                    Ok(parsed) => parsed,
-                    Err(_) => {
-                        let err_msg = format!("Cannot parse URL: {}", payload);
-                        println!("{}", err_msg.as_str());
-
-                        // build reply multipart envelope to client as:
-                        // CLIENT, EMPTY, REPLY, EMPTY, CONTENT
-                        let reply_envelope = vec![
-                            client_id.as_bytes().to_vec(),
-                            b"".to_vec(),
-                            b"ERROR".to_vec(),
-                            b"".to_vec(),
-                            err_msg.as_bytes().to_vec(),
-                        ];
-
-                        zmq_send_multipart(
-                            &service_socket,
-                            reply_envelope,
-                            format!("failed sending reply to client #{}", client_id).as_str(),
-                        );
-                        continue;
-                    }
-                };
-                let filepath = self.output_dir.join(Path::new(
-                    format!("req-{}-{}.pdf", self.id, message_id).as_str(),
-                ));
-                unsafe {
-                    let mut pdfout = pdf_app
-                        .builder()
-                        .orientation(Orientation::Landscape)
-                        .margin(Size::Inches(2))
-                        .title("A taste of WkHTMLtoPDF Cluster")
-                        .object_setting("load.windowStatus", "ready")
-                        .build_from_url(url)
-                        .expect(format!("failed to build {}", filepath.to_str().unwrap()).as_str());
-                    pdfout
-                        .save(&filepath)
-                        .expect(format!("failed to save {}", filepath.to_str().unwrap()).as_str());
-                }
-                println!(
-                    "[#{}] Built PDF is saved as: {}",
-                    self.id,
-                    filepath.to_str().unwrap()
-                );
-
-                let content = format!("PDF saved at output directory");
-
-                // build reply multipart envelope to client as:
-                // CLIENT, EMPTY, REPLY, EMPTY, CONTENT
-                let reply_envelope = vec![
-                    client_id.as_bytes().to_vec(),
-                    b"".to_vec(),
-                    b"REPLY".to_vec(),
-                    b"".to_vec(),
-                    content.as_bytes().to_vec(),
-                ];
-
-                zmq_send_multipart(
-                    &service_socket,
-                    reply_envelope,
-                    format!("failed sending reply to client #{}", client_id).as_str(),
-                );
+                self.handle_client_request(&service_socket, &client_id, &request, &mut pdf_app);
             }
         }
 
@@ -195,16 +123,163 @@ impl Worker {
 
         Ok(())
     }
-}
 
-pub fn get_uid() -> u64 {
-    let start = SystemTime::now();
-    let since_the_epoch = start
-        .duration_since(UNIX_EPOCH)
-        .expect("time went backwards");
-    let time_in_ms =
-        since_the_epoch.as_secs() * 1000 + since_the_epoch.subsec_nanos() as u64 / 1_000_000;
-    time_in_ms
+    fn read_client_request(
+        &self,
+        service_socket: &zmq::Socket,
+        message: String,
+    ) -> (String, String) {
+        // multipart envelope of broker's message:
+        //   CLIENT, EMPTY, REQUEST
+        let client_id = message;
+        zmq_assert_empty(
+            &service_socket,
+            "failed reading 1nd <EMPTY> of client's envelope",
+        );
+        let request = zmq_recv_string(
+            &service_socket,
+            "failed reading <REQUEST> from client's envelope",
+        );
+        (client_id, request)
+    }
+
+    fn handle_client_request(
+        &self,
+        service_socket: &zmq::Socket,
+        client_id: &String,
+        request: &String,
+        pdf_app: &mut PdfApplication,
+    ) {
+        // parse request body
+        let payload: Value =
+            serde_json::from_str(request.as_str()).expect("failed parsing request as JSON");
+        println!("[#{}] Client #{} payload: {}", self.id, client_id, payload);
+
+        if payload == Value::Null {
+            let err_msg = format!("Payload cannot be null");
+            println!("{}", err_msg.as_str());
+
+            self.send_reply_with_error(&service_socket, &client_id, &err_msg);
+            return;
+        }
+
+        // parse the actual request
+        let message_id = get_uid();
+        let url = match payload["url"].as_str() {
+            Some(u) => match u.parse() {
+                Ok(parsed) => parsed,
+                Err(_) => {
+                    let err_msg = format!("Cannot parse URL: {}", payload);
+                    println!(
+                        "[#{}] Reply to client #{}: {}",
+                        self.id,
+                        client_id,
+                        err_msg.as_str()
+                    );
+
+                    self.send_reply_with_error(&service_socket, &client_id, &err_msg);
+                    return;
+                }
+            },
+            None => {
+                let err_msg = format!("URL is missing in request payload: {}", payload);
+                println!(
+                    "[#{}] Reply to client #{}: {}",
+                    self.id,
+                    client_id,
+                    err_msg.as_str()
+                );
+
+                self.send_reply_with_error(&service_socket, &client_id, &err_msg);
+                return;
+            }
+        };
+        let filepath = self.output_dir.join(Path::new(
+            format!("req-{}-{}.pdf", self.id, message_id).as_str(),
+        ));
+
+        // actual pdf building
+        unsafe {
+            let mut pdf_builder = pdf_app.builder();
+            if let Value::String(title) = &payload["title"] {
+                pdf_builder.title(title.as_str());
+            }
+            if let Value::String(window_status) = &payload["load.windowStatus"] {
+                pdf_builder.object_setting("load.windowStatus", window_status.clone());
+            }
+            if let Value::String(orientation) = &payload["orientation"] {
+                pdf_builder.orientation(if orientation == "landscape" {
+                    Orientation::Landscape
+                } else {
+                    Orientation::Portrait
+                });
+            }
+            if let Value::Number(margin) = &payload["margin"] {
+                pdf_builder.margin(Size::Inches(margin.as_u64().unwrap_or(1 as u64) as u32));
+            }
+
+            let mut pdf_out = pdf_builder
+                .build_from_url(url)
+                .expect(format!("failed to build {}", filepath.to_str().unwrap()).as_str());
+            pdf_out
+                .save(&filepath)
+                .expect(format!("failed to save {}", filepath.to_str().unwrap()).as_str());
+        }
+
+        println!(
+            "[#{}] PDF built for client #{}: {}",
+            self.id,
+            client_id,
+            filepath.to_str().unwrap()
+        );
+
+        // TODO: reply with pdf binary content instead of this dummy message
+        let content = format!("PDF saved at output directory");
+
+        self.send_reply_with_success(&service_socket, &client_id, &content);
+    }
+
+    fn send_reply_with_success(
+        &self,
+        service_socket: &zmq::Socket,
+        client_id: &String,
+        content: &String,
+    ) {
+        self.send_reply(&service_socket, &client_id, "REPLY", &content);
+    }
+
+    fn send_reply_with_error(
+        &self,
+        service_socket: &zmq::Socket,
+        client_id: &String,
+        err_msg: &String,
+    ) {
+        self.send_reply(&service_socket, &client_id, "ERROR", &err_msg);
+    }
+
+    fn send_reply(
+        &self,
+        service_socket: &zmq::Socket,
+        client_id: &String,
+        reply_type: &str,
+        reply_content: &String,
+    ) {
+        // build reply multipart envelope to client as:
+        // CLIENT, EMPTY, REPLY|ERROR, EMPTY, CONTENT
+        let reply_envelope = vec![
+            client_id.as_bytes().to_vec(),
+            b"".to_vec(),
+            reply_type.as_bytes().to_vec(),
+            b"".to_vec(),
+            reply_content.as_bytes().to_vec(),
+        ];
+
+        zmq_send_multipart(
+            &service_socket,
+            reply_envelope,
+            format!("failed sending reply to client #{}", client_id).as_str(),
+        );
+    }
 }
 
 // Unit testing
