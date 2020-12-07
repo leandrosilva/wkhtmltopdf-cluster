@@ -1,13 +1,17 @@
 use super::error::Result;
 use super::helpers::{get_uid, zmq_assert_empty, zmq_recv_string, zmq_send, zmq_send_multipart};
 use serde_json::Value;
+use std::fs::File;
+use std::io;
 use std::path::{Path, PathBuf};
 use std::process;
+use std::str::FromStr;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{channel, Receiver, Sender};
 use std::sync::Arc;
 use std::thread;
 use std::time::Duration;
+use url::Url;
 use wkhtmltopdf::{Orientation, PdfApplication, Size};
 use zmq;
 
@@ -166,7 +170,7 @@ impl Worker {
         // parse the actual request
         let message_id = get_uid();
         let url = match payload["url"].as_str() {
-            Some(s) => match s.parse() {
+            Some(s) => match Url::from_str(&s) {
                 Ok(parsed) => parsed,
                 Err(_) => {
                     let err_msg = format!("Cannot parse URL: {}", payload);
@@ -201,6 +205,7 @@ impl Worker {
         // actual pdf building
         unsafe {
             let mut pdf_builder = pdf_app.builder();
+
             if let Value::String(title) = &payload["title"] {
                 pdf_builder.title(title.as_str());
             }
@@ -218,12 +223,35 @@ impl Worker {
                 pdf_builder.margin(Size::Inches(margin.as_u64().unwrap_or(1 as u64) as u32));
             }
 
-            let mut pdf_out = pdf_builder
-                .build_from_url(url)
-                .expect(format!("failed to build {}", filepath.to_str().unwrap()).as_str());
-            pdf_out
-                .save(&filepath)
-                .expect(format!("failed to save {}", filepath.to_str().unwrap()).as_str());
+            let pdf_global_settings = pdf_builder
+                .global_settings()
+                .expect("failed to create global settings");
+            let pdf_object_setting = pdf_builder
+                .object_settings()
+                .expect("failed to create object settings");
+
+            let mut pdf_converter = pdf_global_settings.create_converter();
+            pdf_converter.add_page_object(pdf_object_setting, url.as_str());
+
+            let mut pdf_out = pdf_converter.convert().expect(
+                format!(
+                    "failed to convert {} to {}",
+                    url,
+                    filepath.to_str().unwrap()
+                )
+                .as_str(),
+            );
+
+            let mut pdf_file = File::create(&filepath)
+                .expect(format!("failed to create {}", filepath.to_str().unwrap()).as_str());
+            let pdf_bytes =
+                io::copy(&mut pdf_out, &mut pdf_file).expect("failed to write to basic.pdf");
+            println!(
+                "[#{}] Wrote {} bytes to file: {}",
+                self.id,
+                pdf_bytes,
+                filepath.to_str().unwrap()
+            );
         }
 
         println!(
