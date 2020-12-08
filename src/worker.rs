@@ -239,7 +239,7 @@ impl Worker {
             let id = self.id;
             pdf_converter.set_warning_callback(Some(Box::new(move |warn| {
                 println!(
-                    "[#{}] {}",
+                    "[#{}] Warning: {}",
                     id,
                     warn
                 );
