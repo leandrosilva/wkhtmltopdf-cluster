@@ -12,7 +12,8 @@
         setTimeout(function () {
             var end = Date.now();
             document.getElementById("htwo").innerText = "Boooom! After " + (end-start)/1000 + " secs waiting";
-            document.getElementById("wtime").innerText = Date.now()
+            document.getElementById("wtime").innerText = Date.now();
+            this.does.not.exist;
             window.status = "ready";
         }, 5 * 1000);
     </script>

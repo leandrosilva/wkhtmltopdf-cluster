@@ -209,6 +209,9 @@ impl Worker {
             if let Value::String(title) = &payload["title"] {
                 pdf_builder.title(title.as_str());
             }
+            if let Value::Bool(debug_js) = &payload["load.debugJavascript"] {
+                pdf_builder.object_setting("load.debugJavascript", debug_js.to_string().clone());
+            }
             if let Value::String(window_status) = &payload["load.windowStatus"] {
                 pdf_builder.object_setting("load.windowStatus", window_status.clone());
             }
@@ -232,6 +235,15 @@ impl Worker {
 
             let mut pdf_converter = pdf_global_settings.create_converter();
             pdf_converter.add_page_object(pdf_object_setting, url.as_str());
+
+            let id = self.id;
+            pdf_converter.set_warning_callback(Some(Box::new(move |warn| {
+                println!(
+                    "[#{}] {}",
+                    id,
+                    warn
+                );
+            })));
 
             let mut pdf_out = pdf_converter.convert().expect(
                 format!(
