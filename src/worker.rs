@@ -43,9 +43,8 @@ impl Worker {
     }
 
     pub fn run<'a, F: 'a + Fn()>(&'a mut self, on_ready: F) -> Result<()> {
-        let service_socket_guard = self
-            .create_service_socket()
-            .expect("failed to get a service socket guard");
+        let service_socket_guard =
+            create_service_socket(self.id).expect("failed to get a service socket guard");
         let (heartbeat_tx, heartbeat_rx) = channel::<()>();
         self.watch_eventloop(heartbeat_rx);
         self.run_eventloop(service_socket_guard.clone(), heartbeat_tx, on_ready)
@@ -82,7 +81,7 @@ impl Worker {
 
             // worker is ready, so notify it
             on_ready();
-            self.send_messsage(
+            send_messsage(
                 service_socket_guard.clone(),
                 "READY",
                 "failed sending <READY> to broker",
@@ -100,7 +99,7 @@ impl Worker {
 
                 // try to grap some reply message from broker, which might be a command or a
                 // client ID followed by an actual request
-                let message = match self.recv_message(service_socket_guard.clone()) {
+                let message = match recv_message(service_socket_guard.clone()) {
                     Ok(received) => received.unwrap(),
                     Err(_) => continue,
                 };
@@ -108,7 +107,7 @@ impl Worker {
 
                 // -- from broker
                 if message == "STOP" {
-                    self.send_messsage(
+                    send_messsage(
                         service_socket_guard.clone(),
                         "GONE",
                         "failed to send <GONE> response",
@@ -131,7 +130,7 @@ impl Worker {
         }
 
         println!("[#{}] Stopping...", self.id);
-        self.finish_service_socket(service_socket_guard.clone());
+        finish_service_socket(service_socket_guard.clone());
         println!("[#{}] Disconnected from broker to stop", self.id);
 
         Ok(())
@@ -175,7 +174,7 @@ impl Worker {
             let err_msg = format!("Payload cannot be null");
             println!("{}", err_msg.as_str());
 
-            self.send_client_reply_with_error(service_socket_guard.clone(), &client_id, &err_msg);
+            send_client_reply_with_error(service_socket_guard.clone(), &client_id, &err_msg);
             return;
         }
 
@@ -193,7 +192,7 @@ impl Worker {
                         err_msg.as_str()
                     );
 
-                    self.send_client_reply_with_error(
+                    send_client_reply_with_error(
                         service_socket_guard.clone(),
                         &client_id,
                         &err_msg,
@@ -210,11 +209,7 @@ impl Worker {
                     err_msg.as_str()
                 );
 
-                self.send_client_reply_with_error(
-                    service_socket_guard.clone(),
-                    &client_id,
-                    &err_msg,
-                );
+                send_client_reply_with_error(service_socket_guard.clone(), &client_id, &err_msg);
                 return;
             }
         };
@@ -256,9 +251,23 @@ impl Worker {
             let mut pdf_converter = pdf_global_settings.create_converter();
             pdf_converter.add_page_object(pdf_object_setting, url.as_str());
 
-            let id = self.id;
+            let local_id = self.id;
+            let local_client_id = client_id.clone();
+            let local_service_socket_guard = service_socket_guard.clone();
             pdf_converter.set_warning_callback(Some(Box::new(move |warn| {
-                println!("[#{}] Warning: {}", id, warn);
+                println!("[#{}] Warning: {}", local_id, warn);
+                // TODO: There is a bug now, because worker replies but then dies
+                //       Broker don't know Worker will die, so when Broker gets a
+                //       reply and forwards it to Client, Broker puts Worker back
+                //       to current available list, therefore if a request arrives,
+                //       Worker maybe elected to do the work. This is bad behavior.
+                send_client_reply_with_error(
+                    local_service_socket_guard.clone(),
+                    &local_client_id,
+                    &warn,
+                );
+                // TODO: Do something bether here
+                // panic!("aborting due to potential JavaScript error");
             })));
 
             let mut pdf_out = pdf_converter.convert().expect(
@@ -292,100 +301,95 @@ impl Worker {
         // TODO: reply with pdf binary content instead of this dummy message
         let content = format!("PDF saved at output directory");
 
-        self.send_client_reply_with_success(service_socket_guard.clone(), &client_id, &content);
+        send_client_reply_with_success(service_socket_guard.clone(), &client_id, &content);
     }
+}
 
-    // Service socket
-    //
+// Service socket
+//
 
-    fn create_service_socket(&self) -> Result<Arc<Mutex<zmq::Socket>>> {
-        let socket_id = format!("W{}", self.id);
-        let context = zmq::Context::new();
-        let service_socket = context.socket(zmq::REQ).unwrap();
-        service_socket.set_identity(socket_id.as_bytes())?;
-        service_socket.set_sndtimeo(1000)?;
-        service_socket.set_rcvtimeo(1000)?;
-        service_socket
-            .connect("tcp://127.0.0.1:6661")
-            .expect("failed listening on port 6661");
-        let guard = Arc::new(Mutex::new(service_socket));
-        Ok(guard)
-    }
-    fn finish_service_socket(&self, service_socket_guard: Arc<Mutex<zmq::Socket>>) {
-        let service_socket = service_socket_guard
-            .lock()
-            .expect(MSG_FAILED_TO_ACQUIRE_LOCK_OF_SERVICE_SOCKET);
-        service_socket
-            .disconnect("tcp://127.0.0.1:6661")
-            .expect("failed disconnecting on port 6661");
-    }
+fn create_service_socket(id: u32) -> Result<Arc<Mutex<zmq::Socket>>> {
+    let socket_id = format!("W{}", id);
+    let context = zmq::Context::new();
+    let service_socket = context.socket(zmq::REQ).unwrap();
+    service_socket.set_identity(socket_id.as_bytes())?;
+    service_socket.set_sndtimeo(1000)?;
+    service_socket.set_rcvtimeo(1000)?;
+    service_socket
+        .connect("tcp://127.0.0.1:6661")
+        .expect("failed listening on port 6661");
+    let guard = Arc::new(Mutex::new(service_socket));
+    Ok(guard)
+}
+fn finish_service_socket(service_socket_guard: Arc<Mutex<zmq::Socket>>) {
+    let service_socket = service_socket_guard
+        .lock()
+        .expect(MSG_FAILED_TO_ACQUIRE_LOCK_OF_SERVICE_SOCKET);
+    service_socket
+        .disconnect("tcp://127.0.0.1:6661")
+        .expect("failed disconnecting on port 6661");
+}
 
-    fn send_messsage(
-        &self,
-        service_socket_guard: Arc<Mutex<zmq::Socket>>,
-        message: &str,
-        expect_message: &str,
-    ) {
-        let service_socket = service_socket_guard
-            .lock()
-            .expect(MSG_FAILED_TO_ACQUIRE_LOCK_OF_SERVICE_SOCKET);
-        zmq_send(&service_socket, message, expect_message);
-    }
+fn send_messsage(
+    service_socket_guard: Arc<Mutex<zmq::Socket>>,
+    message: &str,
+    expect_message: &str,
+) {
+    let service_socket = service_socket_guard
+        .lock()
+        .expect(MSG_FAILED_TO_ACQUIRE_LOCK_OF_SERVICE_SOCKET);
+    zmq_send(&service_socket, message, expect_message);
+}
 
-    fn recv_message(
-        &self,
-        service_socket_guard: Arc<Mutex<zmq::Socket>>,
-    ) -> std::result::Result<std::result::Result<String, Vec<u8>>, zmq::Error> {
-        let service_socket = service_socket_guard
-            .lock()
-            .expect(MSG_FAILED_TO_ACQUIRE_LOCK_OF_SERVICE_SOCKET);
-        service_socket.recv_string(0)
-    }
+fn recv_message(
+    service_socket_guard: Arc<Mutex<zmq::Socket>>,
+) -> std::result::Result<std::result::Result<String, Vec<u8>>, zmq::Error> {
+    let service_socket = service_socket_guard
+        .lock()
+        .expect(MSG_FAILED_TO_ACQUIRE_LOCK_OF_SERVICE_SOCKET);
+    service_socket.recv_string(0)
+}
 
-    fn send_client_reply_with_success(
-        &self,
-        service_socket_guard: Arc<Mutex<zmq::Socket>>,
-        client_id: &String,
-        content: &String,
-    ) {
-        self.send_client_reply(service_socket_guard.clone(), &client_id, "REPLY", &content);
-    }
+fn send_client_reply_with_success(
+    service_socket_guard: Arc<Mutex<zmq::Socket>>,
+    client_id: &String,
+    content: &String,
+) {
+    send_client_reply(service_socket_guard.clone(), &client_id, "REPLY", &content);
+}
 
-    fn send_client_reply_with_error(
-        &self,
-        service_socket_guard: Arc<Mutex<zmq::Socket>>,
-        client_id: &String,
-        err_msg: &String,
-    ) {
-        self.send_client_reply(service_socket_guard.clone(), &client_id, "ERROR", &err_msg);
-    }
+fn send_client_reply_with_error(
+    service_socket_guard: Arc<Mutex<zmq::Socket>>,
+    client_id: &String,
+    err_msg: &String,
+) {
+    send_client_reply(service_socket_guard.clone(), &client_id, "ERROR", &err_msg);
+}
 
-    fn send_client_reply(
-        &self,
-        service_socket_guard: Arc<Mutex<zmq::Socket>>,
-        client_id: &String,
-        reply_type: &str,
-        reply_content: &String,
-    ) {
-        let service_socket = service_socket_guard
-            .lock()
-            .expect(MSG_FAILED_TO_ACQUIRE_LOCK_OF_SERVICE_SOCKET);
-        // build reply multipart envelope to client as:
-        //   CLIENT, EMPTY, REPLY|ERROR, EMPTY, CONTENT
-        let reply_envelope = vec![
-            client_id.as_bytes().to_vec(),
-            b"".to_vec(),
-            reply_type.as_bytes().to_vec(),
-            b"".to_vec(),
-            reply_content.as_bytes().to_vec(),
-        ];
+fn send_client_reply(
+    service_socket_guard: Arc<Mutex<zmq::Socket>>,
+    client_id: &String,
+    reply_type: &str,
+    reply_content: &String,
+) {
+    let service_socket = service_socket_guard
+        .lock()
+        .expect(MSG_FAILED_TO_ACQUIRE_LOCK_OF_SERVICE_SOCKET);
+    // build reply multipart envelope to client as:
+    //   CLIENT, EMPTY, REPLY|ERROR, EMPTY, CONTENT
+    let reply_envelope = vec![
+        client_id.as_bytes().to_vec(),
+        b"".to_vec(),
+        reply_type.as_bytes().to_vec(),
+        b"".to_vec(),
+        reply_content.as_bytes().to_vec(),
+    ];
 
-        zmq_send_multipart(
-            &service_socket,
-            reply_envelope,
-            format!("failed sending reply to client #{}", client_id).as_str(),
-        );
-    }
+    zmq_send_multipart(
+        &service_socket,
+        reply_envelope,
+        format!("failed sending reply to client #{}", client_id).as_str(),
+    );
 }
 
 // Unit testing
