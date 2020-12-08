@@ -15,7 +15,8 @@ use url::Url;
 use wkhtmltopdf::{Orientation, PdfApplication, Size};
 use zmq;
 
-const MSG_FAILED_TO_ACQUIRE_LOCK_OF_SERVICE_SOCKET: &str = "failed to acquire lock of service socket";
+const MSG_FAILED_TO_ACQUIRE_LOCK_OF_SERVICE_SOCKET: &str =
+    "failed to acquire lock of service socket";
 
 #[derive(Debug)]
 pub struct Worker {
@@ -141,7 +142,9 @@ impl Worker {
         service_socket_guard: Arc<Mutex<zmq::Socket>>,
         message: String,
     ) -> (String, String) {
-        let service_socket = service_socket_guard.lock().expect(MSG_FAILED_TO_ACQUIRE_LOCK_OF_SERVICE_SOCKET);
+        let service_socket = service_socket_guard
+            .lock()
+            .expect(MSG_FAILED_TO_ACQUIRE_LOCK_OF_SERVICE_SOCKET);
         // read multipart envelope from client as:
         //   CLIENT, EMPTY, REQUEST
         let client_id = message;
@@ -190,7 +193,11 @@ impl Worker {
                         err_msg.as_str()
                     );
 
-                    self.send_client_reply_with_error(service_socket_guard.clone(), &client_id, &err_msg);
+                    self.send_client_reply_with_error(
+                        service_socket_guard.clone(),
+                        &client_id,
+                        &err_msg,
+                    );
                     return;
                 }
             },
@@ -203,7 +210,11 @@ impl Worker {
                     err_msg.as_str()
                 );
 
-                self.send_client_reply_with_error(service_socket_guard.clone(), &client_id, &err_msg);
+                self.send_client_reply_with_error(
+                    service_socket_guard.clone(),
+                    &client_id,
+                    &err_msg,
+                );
                 return;
             }
         };
@@ -295,15 +306,15 @@ impl Worker {
         service_socket.set_sndtimeo(1000)?;
         service_socket.set_rcvtimeo(1000)?;
         service_socket
-        .connect("tcp://127.0.0.1:6661")
-        .expect("failed listening on port 6661");
-        
+            .connect("tcp://127.0.0.1:6661")
+            .expect("failed listening on port 6661");
         let guard = Arc::new(Mutex::new(service_socket));
         Ok(guard)
     }
-    
     fn finish_service_socket(&self, service_socket_guard: Arc<Mutex<zmq::Socket>>) {
-        let service_socket = service_socket_guard.lock().expect(MSG_FAILED_TO_ACQUIRE_LOCK_OF_SERVICE_SOCKET);
+        let service_socket = service_socket_guard
+            .lock()
+            .expect(MSG_FAILED_TO_ACQUIRE_LOCK_OF_SERVICE_SOCKET);
         service_socket
             .disconnect("tcp://127.0.0.1:6661")
             .expect("failed disconnecting on port 6661");
@@ -315,7 +326,9 @@ impl Worker {
         message: &str,
         expect_message: &str,
     ) {
-        let service_socket = service_socket_guard.lock().expect(MSG_FAILED_TO_ACQUIRE_LOCK_OF_SERVICE_SOCKET);
+        let service_socket = service_socket_guard
+            .lock()
+            .expect(MSG_FAILED_TO_ACQUIRE_LOCK_OF_SERVICE_SOCKET);
         zmq_send(&service_socket, message, expect_message);
     }
 
@@ -323,7 +336,9 @@ impl Worker {
         &self,
         service_socket_guard: Arc<Mutex<zmq::Socket>>,
     ) -> std::result::Result<std::result::Result<String, Vec<u8>>, zmq::Error> {
-        let service_socket = service_socket_guard.lock().expect(MSG_FAILED_TO_ACQUIRE_LOCK_OF_SERVICE_SOCKET);
+        let service_socket = service_socket_guard
+            .lock()
+            .expect(MSG_FAILED_TO_ACQUIRE_LOCK_OF_SERVICE_SOCKET);
         service_socket.recv_string(0)
     }
 
@@ -352,7 +367,9 @@ impl Worker {
         reply_type: &str,
         reply_content: &String,
     ) {
-        let service_socket = service_socket_guard.lock().expect(MSG_FAILED_TO_ACQUIRE_LOCK_OF_SERVICE_SOCKET);
+        let service_socket = service_socket_guard
+            .lock()
+            .expect(MSG_FAILED_TO_ACQUIRE_LOCK_OF_SERVICE_SOCKET);
         // build reply multipart envelope to client as:
         //   CLIENT, EMPTY, REPLY|ERROR, EMPTY, CONTENT
         let reply_envelope = vec![
