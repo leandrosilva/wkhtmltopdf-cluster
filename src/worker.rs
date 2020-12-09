@@ -1,5 +1,6 @@
 use super::error::Result;
 use super::helpers::{get_uid, zmq_assert_empty, zmq_recv_string, zmq_send, zmq_send_multipart};
+use super::protocol::*;
 use serde_json::Value;
 use std::fs::File;
 use std::io;
@@ -174,7 +175,12 @@ impl Worker {
             let err_msg = format!("Payload cannot be null");
             println!("{}", err_msg.as_str());
 
-            send_client_reply_with_error(service_socket_guard.clone(), &client_id, &err_msg);
+            send_client_reply_with_error(
+                service_socket_guard.clone(),
+                &client_id,
+                REP_400_BAD_REQUEST,
+                &err_msg,
+            );
             return;
         }
 
@@ -195,6 +201,7 @@ impl Worker {
                     send_client_reply_with_error(
                         service_socket_guard.clone(),
                         &client_id,
+                        REP_400_BAD_REQUEST,
                         &err_msg,
                     );
                     return;
@@ -209,7 +216,12 @@ impl Worker {
                     err_msg.as_str()
                 );
 
-                send_client_reply_with_error(service_socket_guard.clone(), &client_id, &err_msg);
+                send_client_reply_with_error(
+                    service_socket_guard.clone(),
+                    &client_id,
+                    REP_400_BAD_REQUEST,
+                    &err_msg,
+                );
                 return;
             }
         };
@@ -256,14 +268,18 @@ impl Worker {
             let local_service_socket_guard = service_socket_guard.clone();
             pdf_converter.set_warning_callback(Some(Box::new(move |warn| {
                 println!("[#{}] Warning: {}", local_id, warn);
-                send_client_reply_with_panic(
+                send_client_reply_with_error(
                     local_service_socket_guard.clone(),
                     &local_client_id,
+                    REP_502_BAD_GATEWAY,
                     &warn,
                 );
                 // Waits just a bit to let message goes to client
                 thread::sleep(Duration::from_millis(50));
-                panic!("worker #{} for client #{} is aborting due to potential JavaScript error", local_id, local_client_id);
+                panic!(
+                    "worker #{} for client #{} is aborting due to potential JavaScript error",
+                    local_id, local_client_id
+                );
             })));
 
             let mut pdf_out = pdf_converter.convert().expect(
@@ -351,23 +367,26 @@ fn send_client_reply_with_success(
     client_id: &String,
     content: &String,
 ) {
-    send_client_reply(service_socket_guard.clone(), &client_id, "REPLY", &content);
+    send_client_reply(
+        service_socket_guard.clone(),
+        &client_id,
+        REP_200_SUCCESS,
+        &content,
+    );
 }
 
 fn send_client_reply_with_error(
     service_socket_guard: Arc<Mutex<zmq::Socket>>,
     client_id: &String,
+    err_code: &str,
     err_msg: &String,
 ) {
-    send_client_reply(service_socket_guard.clone(), &client_id, "ERROR", &err_msg);
-}
-
-fn send_client_reply_with_panic(
-    service_socket_guard: Arc<Mutex<zmq::Socket>>,
-    client_id: &String,
-    err_msg: &String,
-) {
-    send_client_reply(service_socket_guard.clone(), &client_id, "PANIC", &err_msg);
+    send_client_reply(
+        service_socket_guard.clone(),
+        &client_id,
+        &err_code,
+        &err_msg,
+    );
 }
 
 fn send_client_reply(

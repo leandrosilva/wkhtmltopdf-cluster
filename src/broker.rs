@@ -1,5 +1,6 @@
 use super::error::{AnyError, Result};
 use super::helpers::{zmq_assert_empty, zmq_recv_string, zmq_send_multipart};
+use super::protocol::*;
 use std::collections::HashMap;
 use std::collections::VecDeque;
 use std::path::{Path, PathBuf};
@@ -215,11 +216,11 @@ impl Broker {
         );
 
         match worker_message.as_str() {
-            "READY" => {
+            MSG_WORKER_IS_READY => {
                 available_workers.push_front(worker_id.clone());
                 println!("Worker #{} is ready", worker_id)
             }
-            "GONE" => println!("Worker #{} is gone", worker_id),
+            MSG_WORKER_IS_GONE => println!("Worker #{} is gone", worker_id),
             client_id => {
                 zmq_assert_empty(
                     &backend_socket,
@@ -265,8 +266,8 @@ impl Broker {
                     .as_str(),
                 );
 
-                if reply == "PANIC" {
-                    println!("Worker #{} will panic", worker_id);
+                if reply == REP_502_BAD_GATEWAY {
+                    println!("Worker #{} reply 502 and will panic", worker_id);
                 } else {
                     available_workers.push_front(worker_id.clone());
                     println!("Worker #{} is available again", worker_id);
