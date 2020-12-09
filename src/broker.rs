@@ -203,7 +203,6 @@ impl Broker {
         //   ID, EMPTY, CLIENT, EMPTY, REPLY, EMPTY, CONTENT
 
         let worker_id = zmq_recv_string(&backend_socket, "failed reading ID of worker's envelope");
-        available_workers.push_front(worker_id.clone());
 
         zmq_assert_empty(
             &backend_socket,
@@ -216,7 +215,10 @@ impl Broker {
         );
 
         match worker_message.as_str() {
-            "READY" => println!("Worker #{} is ready", worker_id),
+            "READY" => {
+                available_workers.push_front(worker_id.clone());
+                println!("Worker #{} is ready", worker_id)
+            }
             "GONE" => println!("Worker #{} is gone", worker_id),
             client_id => {
                 zmq_assert_empty(
@@ -262,6 +264,13 @@ impl Broker {
                     )
                     .as_str(),
                 );
+
+                if reply == "PANIC" {
+                    println!("Worker #{} will panic", worker_id);
+                } else {
+                    available_workers.push_front(worker_id.clone());
+                    println!("Worker #{} is available again", worker_id);
+                }
             }
         }
         Ok(())

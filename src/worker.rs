@@ -256,18 +256,14 @@ impl Worker {
             let local_service_socket_guard = service_socket_guard.clone();
             pdf_converter.set_warning_callback(Some(Box::new(move |warn| {
                 println!("[#{}] Warning: {}", local_id, warn);
-                // TODO: There is a bug now, because worker replies but then dies
-                //       Broker don't know Worker will die, so when Broker gets a
-                //       reply and forwards it to Client, Broker puts Worker back
-                //       to current available list, therefore if a request arrives,
-                //       Worker maybe elected to do the work. This is bad behavior.
-                send_client_reply_with_error(
+                send_client_reply_with_panic(
                     local_service_socket_guard.clone(),
                     &local_client_id,
                     &warn,
                 );
-                // TODO: Do something bether here
-                // panic!("aborting due to potential JavaScript error");
+                // Waits just a bit to let message goes to client
+                thread::sleep(Duration::from_millis(50));
+                panic!("worker #{} for client #{} is aborting due to potential JavaScript error", local_id, local_client_id);
             })));
 
             let mut pdf_out = pdf_converter.convert().expect(
@@ -364,6 +360,14 @@ fn send_client_reply_with_error(
     err_msg: &String,
 ) {
     send_client_reply(service_socket_guard.clone(), &client_id, "ERROR", &err_msg);
+}
+
+fn send_client_reply_with_panic(
+    service_socket_guard: Arc<Mutex<zmq::Socket>>,
+    client_id: &String,
+    err_msg: &String,
+) {
+    send_client_reply(service_socket_guard.clone(), &client_id, "PANIC", &err_msg);
 }
 
 fn send_client_reply(
