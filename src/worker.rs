@@ -1,5 +1,6 @@
 use super::error::Result;
-use super::helpers::{get_uid, zmq_assert_empty, zmq_recv_string, zmq_send, zmq_send_multipart};
+use super::helpers::get_uid;
+use super::helpers::zmq_helpers::{assert_empty, recv_string, send, send_multipart};
 use super::protocol::*;
 use serde_json::Value;
 use std::fs::File;
@@ -148,11 +149,11 @@ impl Worker {
         // read multipart envelope from client as:
         //   CLIENT, EMPTY, REQUEST
         let client_id = message;
-        zmq_assert_empty(
+        assert_empty(
             &service_socket,
             "failed reading 1nd <EMPTY> of client's envelope",
         );
-        let request = zmq_recv_string(
+        let request = recv_string(
             &service_socket,
             "failed reading <REQUEST> from client's envelope",
         );
@@ -350,7 +351,7 @@ fn send_messsage(
     let service_socket = service_socket_guard
         .lock()
         .expect(MSG_FAILED_TO_ACQUIRE_LOCK_OF_SERVICE_SOCKET);
-    zmq_send(&service_socket, message, expect_message);
+    send(&service_socket, message, expect_message);
 }
 
 fn recv_message(
@@ -408,7 +409,7 @@ fn send_client_reply(
         reply_content.as_bytes().to_vec(),
     ];
 
-    zmq_send_multipart(
+    send_multipart(
         &service_socket,
         reply_envelope,
         format!("failed sending reply to client #{}", client_id).as_str(),

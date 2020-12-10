@@ -5,7 +5,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::thread;
 use std::time::Duration;
-use wkhtmltopdf_cluster::helpers::create_dir_if_not_exists;
+use wkhtmltopdf_cluster::helpers::fs_helpers::create_dir_if_not_exists;
 use wkhtmltopdf_cluster::worker::Worker;
 
 // $ cargo run -p wkhtmltopdf-cluster --bin worker start --output ./examples/pdf

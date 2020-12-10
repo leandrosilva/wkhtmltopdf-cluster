@@ -13,8 +13,12 @@ req.setsockopt(zmq.RCVTIMEO, 10000)
 req.connect('tcp://127.0.0.1:6660')
 
 # msg = 'https://www.google.com.br'
-msg = '{ "url": "file:///D:/Projects/GitHub/wkhtmltopdf-cluster/examples/client/sample1.html", "load.debugJavascript": true, "load.windowStatus": "ready" }'
 # msg = 'file:///Users/leandro/Projects/rust/wkhtmltopdf-cluster/examples/client/sample1.html'
+msg = """{
+    "url": "file:///D:/Projects/GitHub/wkhtmltopdf-cluster/examples/client/sample1.html",
+    "load.debugJavascript": true,
+    "load.windowStatus": "ready"
+}"""
 
 if len(sys.argv) > 1:
     msg = sys.argv[1]

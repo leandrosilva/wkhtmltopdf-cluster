@@ -1,5 +1,5 @@
 use super::error::{AnyError, Result};
-use super::helpers::{zmq_assert_empty, zmq_recv_string, zmq_send_multipart};
+use super::helpers::zmq_helpers::{assert_empty, recv_string, send_multipart};
 use super::protocol::*;
 use std::collections::HashMap;
 use std::collections::VecDeque;
@@ -203,14 +203,14 @@ impl Broker {
         //   ID, EMPTY, CLIENT, EMPTY, REPLY
         //   ID, EMPTY, CLIENT, EMPTY, REPLY, EMPTY, CONTENT
 
-        let worker_id = zmq_recv_string(&backend_socket, "failed reading ID of worker's envelope");
+        let worker_id = recv_string(&backend_socket, "failed reading ID of worker's envelope");
 
-        zmq_assert_empty(
+        assert_empty(
             &backend_socket,
             "failed reading 1st <EMPTY> of worker's envelope",
         );
 
-        let worker_message = zmq_recv_string(
+        let worker_message = recv_string(
             &backend_socket,
             "failed reading <MESSAGE> of worker's envelope",
         );
@@ -222,19 +222,19 @@ impl Broker {
             }
             MSG_WORKER_IS_GONE => println!("Worker #{} is gone", worker_id),
             client_id => {
-                zmq_assert_empty(
+                assert_empty(
                     &backend_socket,
                     "failed reading 2nd <EMPTY> of worker's envelope",
                 );
-                let reply = zmq_recv_string(
+                let reply = recv_string(
                     &backend_socket,
                     "failed reading <REPLY> of worker's envelope",
                 );
-                zmq_assert_empty(
+                assert_empty(
                     &backend_socket,
                     "failed reading 3nd <EMPTY> of worker's envelope",
                 );
-                let content = zmq_recv_string(
+                let content = recv_string(
                     &backend_socket,
                     "failed reading <CONTENT> of worker's envelope",
                 );
@@ -256,7 +256,7 @@ impl Broker {
                 ];
 
                 // forward reply envelope to given client
-                zmq_send_multipart(
+                send_multipart(
                     &frontend_socket,
                     reply_envelope,
                     format!(
@@ -286,15 +286,15 @@ impl Broker {
         // client envelope:
         //   ID, EMPTY, REQUEST
 
-        let client_id = zmq_recv_string(
+        let client_id = recv_string(
             &frontend_socket,
             "failed reading <ID> from client's envelope",
         );
-        zmq_assert_empty(
+        assert_empty(
             &frontend_socket,
             "failed reading 1nd <EMPTY> of client's envelope",
         );
-        let request = zmq_recv_string(
+        let request = recv_string(
             &frontend_socket,
             "failed reading <REQUEST> from client's envelope",
         );
@@ -315,7 +315,7 @@ impl Broker {
         ];
 
         // forward request envelope to given worker
-        zmq_send_multipart(
+        send_multipart(
             &backend_socket,
             reply_envelope,
             format!(
