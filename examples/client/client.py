@@ -17,8 +17,9 @@ req.connect('tcp://127.0.0.1:6660')
 msg = """{
     "url": "file:///D:/Projects/GitHub/wkhtmltopdf-cluster/examples/client/sample1.html",
     "global": {
-        "documentTitle": "Example Client",
-        "copies": 2
+        "documentTitle": "WkHTMLtoPDF Cluster :: Example Client",
+        "copies": 2,
+        "size.pageSize": "A5"
     },
     "object": {
         "load.debugJavascript": true,

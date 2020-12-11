@@ -1,7 +1,7 @@
 use super::error::Result;
 use super::helpers::get_uid;
 use super::helpers::zmq_helpers::{assert_empty, recv_string, send, send_multipart};
-use super::pdf::{PdfSetting, PdfSettingType, PDF_GLOBAL_SETTINGS, PDF_OBJECT_SETTINGS };
+use super::pdf::{get_pdf_setting_value, PDF_GLOBAL_SETTINGS, PDF_OBJECT_SETTINGS};
 use super::protocol::*;
 use serde_json::Value;
 use std::fs::File;
@@ -15,7 +15,7 @@ use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::Duration;
 use url::Url;
-use wkhtmltopdf::{Orientation, PdfApplication, Size};
+use wkhtmltopdf::PdfApplication;
 use zmq;
 
 const MSG_FAILED_TO_ACQUIRE_LOCK_OF_SERVICE_SOCKET: &str =
@@ -233,38 +233,62 @@ impl Worker {
 
         // actual pdf building
         unsafe {
-            let mut pdf_builder = pdf_app.builder();
+            let pdf_builder = pdf_app.builder();
 
             // global converter settings
-            let pdf_global_settings = pdf_builder
+            let mut pdf_global_settings = pdf_builder
                 .global_settings()
                 .expect("failed to create global settings");
 
-            if let Value::Object(global_settings) = &payload["global"] {
-                println!("====");
-                for setting in global_settings {
-                    let (key, value) = setting;
-                    println!("- {:?} = {:?}", key, value);
+            if let Value::Object(json_global_settings) = &payload["global"] {
+                for (json_key, json_value) in json_global_settings {
+                    if let Some(pdf_setting) = PDF_GLOBAL_SETTINGS.get(json_key.as_str()) {
+                        match get_pdf_setting_value(pdf_setting, json_value) {
+                            Ok(v) => pdf_global_settings.set(json_key, v.as_str()).expect(
+                                format!("failed setting global option {}", &json_key).as_str(),
+                            ),
+                            Err(e) => {
+                                send_client_reply_with_error(
+                                    service_socket_guard.clone(),
+                                    &client_id,
+                                    REP_400_BAD_REQUEST,
+                                    &e.details,
+                                );
+                                return;
+                            }
+                        }
+                    }
                 }
-                println!("====");
             }
 
             // object page settings
-            if let Value::Object(object_settings) = &payload["object"] {
-                println!("====");
-                for setting in object_settings {
-                    let (key, value) = setting;
-                    println!("- {:?} = {:?}", key, value);
-                }
-                println!("====");
-            }
-
-            let pdf_object_setting = pdf_builder
+            let mut pdf_object_settings = pdf_builder
                 .object_settings()
                 .expect("failed to create object settings");
 
+            if let Value::Object(json_object_setting) = &payload["object"] {
+                for (json_key, json_value) in json_object_setting {
+                    if let Some(pdf_setting) = PDF_OBJECT_SETTINGS.get(json_key.as_str()) {
+                        match get_pdf_setting_value(pdf_setting, json_value) {
+                            Ok(v) => pdf_object_settings.set(json_key, v.as_str()).expect(
+                                format!("failed setting object option {}", &json_key).as_str(),
+                            ),
+                            Err(e) => {
+                                send_client_reply_with_error(
+                                    service_socket_guard.clone(),
+                                    &client_id,
+                                    REP_400_BAD_REQUEST,
+                                    &e.details,
+                                );
+                                return;
+                            }
+                        }
+                    }
+                }
+            }
+
             let mut pdf_converter = pdf_global_settings.create_converter();
-            pdf_converter.add_page_object(pdf_object_setting, url.as_str());
+            pdf_converter.add_page_object(pdf_object_settings, url.as_str());
 
             let local_id = self.id;
             let local_client_id = client_id.clone();
