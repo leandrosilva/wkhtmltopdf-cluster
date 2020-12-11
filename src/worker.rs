@@ -290,6 +290,7 @@ impl Worker {
             let mut pdf_converter = pdf_global_settings.create_converter();
             pdf_converter.add_page_object(pdf_object_settings, url.as_str());
 
+            // warning behavior
             let local_id = self.id;
             let local_client_id = client_id.clone();
             let local_service_socket_guard = service_socket_guard.clone();
@@ -309,6 +310,7 @@ impl Worker {
                 );
             })));
 
+            // build
             let mut pdf_out = pdf_converter.convert().expect(
                 format!(
                     "failed to convert {} to {}",
@@ -318,6 +320,7 @@ impl Worker {
                 .as_str(),
             );
 
+            // save
             let mut pdf_file = File::create(&filepath)
                 .expect(format!("failed to create {}", filepath.to_str().unwrap()).as_str());
             let pdf_bytes =
