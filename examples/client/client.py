@@ -22,6 +22,10 @@ msg = """{
     "object": {
         "load.debugJavascript": true,
         "load.windowStatus": "ready"
+    },
+    "onWarning": {
+        "action": "abort",
+        "triggerWords": ["error", "fail"]
     }
 }"""
 
