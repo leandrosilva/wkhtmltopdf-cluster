@@ -16,8 +16,14 @@ req.connect('tcp://127.0.0.1:6660')
 # msg = 'file:///Users/leandro/Projects/rust/wkhtmltopdf-cluster/examples/client/sample1.html'
 msg = """{
     "url": "file:///D:/Projects/GitHub/wkhtmltopdf-cluster/examples/client/sample1.html",
-    "load.debugJavascript": true,
-    "load.windowStatus": "ready"
+    "global": {
+        "documentTitle": "Example Client",
+        "copies": 2
+    },
+    "object": {
+        "load.debugJavascript": true,
+        "load.windowStatus": "ready"
+    }
 }"""
 
 if len(sys.argv) > 1:

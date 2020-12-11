@@ -3,3 +3,4 @@ pub mod helpers;
 pub mod protocol;
 pub mod broker;
 pub mod worker;
+pub mod pdf;

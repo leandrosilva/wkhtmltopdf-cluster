@@ -1,6 +1,7 @@
 use super::error::Result;
 use super::helpers::get_uid;
 use super::helpers::zmq_helpers::{assert_empty, recv_string, send, send_multipart};
+use super::pdf::{PdfSetting, PdfSettingType, PDF_GLOBAL_SETTINGS, PDF_OBJECT_SETTINGS };
 use super::protocol::*;
 use serde_json::Value;
 use std::fs::File;
@@ -234,29 +235,30 @@ impl Worker {
         unsafe {
             let mut pdf_builder = pdf_app.builder();
 
-            if let Value::String(title) = &payload["title"] {
-                pdf_builder.title(title.as_str());
-            }
-            if let Value::Bool(debug_js) = &payload["load.debugJavascript"] {
-                pdf_builder.object_setting("load.debugJavascript", debug_js.to_string().clone());
-            }
-            if let Value::String(window_status) = &payload["load.windowStatus"] {
-                pdf_builder.object_setting("load.windowStatus", window_status.clone());
-            }
-            if let Value::String(orientation) = &payload["orientation"] {
-                pdf_builder.orientation(if orientation == "landscape" {
-                    Orientation::Landscape
-                } else {
-                    Orientation::Portrait
-                });
-            }
-            if let Value::Number(margin) = &payload["margin"] {
-                pdf_builder.margin(Size::Inches(margin.as_u64().unwrap_or(1 as u64) as u32));
-            }
-
+            // global converter settings
             let pdf_global_settings = pdf_builder
                 .global_settings()
                 .expect("failed to create global settings");
+
+            if let Value::Object(global_settings) = &payload["global"] {
+                println!("====");
+                for setting in global_settings {
+                    let (key, value) = setting;
+                    println!("- {:?} = {:?}", key, value);
+                }
+                println!("====");
+            }
+
+            // object page settings
+            if let Value::Object(object_settings) = &payload["object"] {
+                println!("====");
+                for setting in object_settings {
+                    let (key, value) = setting;
+                    println!("- {:?} = {:?}", key, value);
+                }
+                println!("====");
+            }
+
             let pdf_object_setting = pdf_builder
                 .object_settings()
                 .expect("failed to create object settings");
