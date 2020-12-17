@@ -4,7 +4,7 @@ use std::env;
 use std::path::Path;
 use std::process;
 use std::time::Duration;
-use std::sync::{Arc, RwLock};
+use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use wkhtmltopdf_cluster::broker::Broker;
 
@@ -81,18 +81,15 @@ fn main() {
             let broker_id = process::id();
 
             println!("WkHTMLtoPDF Cluster :: Manager :: Start [#{}]", broker_id);
-            let broker = Arc::new(RwLock::new(Broker::new(
+            let mut broker = Broker::new(
                 broker_id,
                 stop_signal.clone(),
                 w_instances,
                 Path::new(&w_binpath),
                 Path::new(&w_output),
                 w_timeout
-            )));
+            );
             broker
-                .clone()
-                .write()
-                .expect("failed to acquire lock on broker to start it")
                 .run(|worker_pids| {
                     println!("All workers are up & running:");
                     for worker_pid in worker_pids {
