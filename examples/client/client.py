@@ -2,7 +2,7 @@ import sys
 import zmq
 import os
 
-id = f'C{os.getpid()}'
+id = 'C' + str(os.getpid())
 print('ID:', id)
 
 context = zmq.Context()
@@ -13,7 +13,7 @@ req.setsockopt(zmq.RCVTIMEO, 10000)
 req.connect('tcp://127.0.0.1:6660')
 
 msg = """{
-    "url": "file:///D:/Projects/GitHub/wkhtmltopdf-cluster/examples/client/sample1.html",
+    "url": "file:///Users/leandro/Projects/rust/wkhtmltopdf-cluster/examples/client/sample1.html",
     "global": {
         "documentTitle": "WkHTMLtoPDF Cluster :: Example Client",
         "copies": 2,

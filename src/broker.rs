@@ -394,7 +394,7 @@ impl Broker {
         let sys = System::new_all();
         for (pid, process) in sys.get_processes() {
             if let Some(parent_id) = process.parent() {
-                if parent_id == *id as usize {
+                if parent_id == *id as i32 {
                     worker_processes.push(*pid as u32);
                     callback(parent_id as u32, *pid as u32, process);
                 }
