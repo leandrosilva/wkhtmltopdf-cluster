@@ -291,23 +291,33 @@ impl Worker {
             pdf_converter.add_page_object(pdf_object_settings, url.as_str());
 
             // warning behavior
+            let mut on_warning_action = String::from("abort");
+            let on_warning_trigger_words: Vec::<String>;
+            if let Value::Object(json_on_warning) = &payload["onWarning"] {
+                if let Some(action) = json_on_warning["action"].as_str() {
+                    on_warning_action = action.to_owned();
+                }
+            }
+
             let local_id = self.id;
             let local_client_id = client_id.clone();
             let local_service_socket_guard = service_socket_guard.clone();
             pdf_converter.set_warning_callback(Some(Box::new(move |warn| {
                 println!("[#{}] Warning: {}", local_id, warn);
-                send_client_reply_with_error(
-                    local_service_socket_guard.clone(),
-                    &local_client_id,
-                    REP_502_BAD_GATEWAY,
-                    &warn,
-                );
-                // Waits just a bit to let message goes to client
-                thread::sleep(Duration::from_millis(50));
-                panic!(
-                    "worker #{} for client #{} is aborting due to potential JavaScript error",
-                    local_id, local_client_id
-                );
+                if on_warning_action == "abort" {
+                    send_client_reply_with_error(
+                        local_service_socket_guard.clone(),
+                        &local_client_id,
+                        REP_502_BAD_GATEWAY,
+                        &warn,
+                    );
+                    // Waits just a bit to let message goes to client
+                    thread::sleep(Duration::from_millis(50));
+                    panic!(
+                        "worker #{} for client #{} is aborting due to potential JavaScript error",
+                        local_id, local_client_id
+                    );
+                }
             })));
 
             // build
