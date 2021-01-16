@@ -92,6 +92,7 @@ lazy_static! {
         m.insert("load.usions.ername",             PdfSetting { scope: "Object", key: "load.username", value_type: PdfSettingType::ValueString });
         m.insert("load.password",                  PdfSetting { scope: "Object", key: "load.password", value_type: PdfSettingType::ValueString });
         m.insert("load.jsdelay",                   PdfSetting { scope: "Object", key: "load.jsdelay", value_type: PdfSettingType::ValueUint });
+        m.insert("load.debugJavascript",           PdfSetting { scope: "Object", key: "load.debugJavascript", value_type: PdfSettingType::ValueBool });
         m.insert("load.windowStatus",              PdfSetting { scope: "Object", key: "load.windowStatus", value_type: PdfSettingType::ValueString });
         m.insert("load.zoomFactor",                PdfSetting { scope: "Object", key: "load.zoomFactor", value_type: PdfSettingType::ValueString });
         m.insert("load.blockLocalFileAccess",      PdfSetting { scope: "Object", key: "load.blockLocalFileAccess", value_type: PdfSettingType::ValueString });
